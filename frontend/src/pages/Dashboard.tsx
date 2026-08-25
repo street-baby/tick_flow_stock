@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -554,6 +554,30 @@ export function Dashboard() {
     placeholderData: (prev) => prev,
   })
   const data = overview.data
+
+  const isCn = market === 'cn'
+  const liveIndexQuotes = useQuery({
+    queryKey: ['live-dashboard-indices', market],
+    queryFn: () => api.indexQuotes(['000001.SH', '399001.SZ', '399006.SZ', '000680.SH']),
+    enabled: isCn && !selectedDate,
+    refetchInterval: 3_000,
+  })
+
+  const displayIndices = useMemo(() => {
+    const base = data?.indices ?? []
+    if (!liveIndexQuotes.data?.rows?.length) return base
+    const liveMap = new Map(liveIndexQuotes.data.rows.map(r => [r.symbol, r]))
+    return base.map(item => {
+      const live = liveMap.get(item.symbol)
+      if (!live) return item
+      return {
+        ...item,
+        last_price: live.last_price ?? live.close ?? item.last_price,
+        change_pct: live.change_pct ?? item.change_pct,
+        change_amount: live.change_amount ?? item.change_amount,
+      }
+    })
+  }, [data?.indices, liveIndexQuotes.data])
   const caps = useCapabilities()
   const settings = useSettings()
   const hasDepth = !!caps.data?.capabilities?.['depth5.batch']
@@ -787,7 +811,7 @@ export function Dashboard() {
       </div>
 
       <div className="mb-1.5 grid grid-cols-4 gap-1">
-        {data.indices.map(item => <IndexTicker key={item.symbol} item={item} />)}
+        {displayIndices.map(item => <IndexTicker key={item.symbol} item={item} />)}
       </div>
 
       <div className="mb-1.5 grid grid-cols-6 gap-1">

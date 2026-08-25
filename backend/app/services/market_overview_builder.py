@@ -91,12 +91,58 @@ def _quote_status(quote_service) -> dict:
     return qs.status()
 
 
+def _fetch_sina_core_index_quotes() -> list[dict]:
+    try:
+        import httpx
+        sina_map = {
+            "000001.SH": "s_sh000001",
+            "399001.SZ": "s_sz399001",
+            "399006.SZ": "s_sz399006",
+            "000680.SH": "s_sh000680",
+        }
+        url = f"http://hq.sinajs.cn/list={','.join(sina_map.values())}"
+        resp = httpx.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=2.5)
+        if resp.status_code != 200:
+            return []
+        rows: list[dict] = []
+        sym_by_sina = {v: k for k, v in sina_map.items()}
+        for line in resp.text.splitlines():
+            if '="' not in line:
+                continue
+            k_part, v_part = line.split('="', 1)
+            var_name = k_part.replace("var hq_str_", "").strip()
+            val_str = v_part.rstrip('";').strip()
+            if not val_str:
+                continue
+            parts = val_str.split(",")
+            if len(parts) >= 6:
+                name = parts[0]
+                price = float(parts[1])
+                change_amt = float(parts[2])
+                change_pct = float(parts[3])
+                orig_sym = sym_by_sina.get(var_name, var_name)
+                rows.append({
+                    "symbol": orig_sym,
+                    "name": name or CORE_INDEX_NAMES.get(orig_sym),
+                    "last_price": price,
+                    "close": price,
+                    "change_amount": change_amt,
+                    "change_pct": change_pct,
+                })
+        return rows
+    except Exception:
+        return []
+
+
 def _index_quotes(repo, quote_service, as_of: date | None = None) -> list[dict]:
     rows: list[dict] = []
     if quote_service and as_of is None:
         df = quote_service.get_index_quotes(list(CORE_INDEX_SYMBOLS))
         if not df.is_empty():
             rows = df.to_dicts()
+
+    if not rows and as_of is None:
+        rows = _fetch_sina_core_index_quotes()
 
     if not rows and repo:
         placeholders = ", ".join("?" for _ in CORE_INDEX_SYMBOLS)
