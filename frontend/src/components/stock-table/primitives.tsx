@@ -9,7 +9,7 @@
  * 财务率类用 fmtPct、kdj 用 toFixed(1)、vol_ma 用 fmtBigNum 等。
  */
 import type { ReactNode } from 'react'
-import { fmtPrice, fmtPct, fmtPctValue, fmtBigNum, priceColorClass } from '@/lib/format'
+import { fmtPrice, fmtPct, fmtBigNum, priceColorClass } from '@/lib/format'
 import type { ColumnConfig } from '@/lib/list-columns'
 import { NUM_CELL_CLASS } from '@/lib/stock-table'
 
@@ -60,7 +60,7 @@ export function renderBuiltinDataCell(r: any, col: ColumnConfig): ReactNode | nu
     case 'price':
       return <td key={col.id} className={`${numCls} text-secondary`}>{fmtMaybePrice(r.close)}</td>
     case 'pct':
-      return <td key={col.id} className={`${numCls} font-medium ${priceColorClass(r.change_pct)}`}>{fmtPctValue(r.change_pct)}</td>
+      return <td key={col.id} className={`${numCls} font-medium ${priceColorClass(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>
     case 'change_amount':
       return <td key={col.id} className={`${numCls} ${priceColorClass(r.change_amount)}`}>{r.change_amount != null ? fmtPrice(r.change_amount) : '—'}</td>
     case 'amplitude':

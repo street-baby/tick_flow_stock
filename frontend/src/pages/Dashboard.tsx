@@ -45,7 +45,8 @@ function fmtIndexPct(v: number | null | undefined) {
 function fmtStockPct(v: number | null | undefined) {
   const x = n(v)
   if (x == null) return '—'
-  return `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`
+  const val = Math.abs(x) <= 1.0 && x !== 0 ? x * 100 : x
+  return `${val >= 0 ? '+' : ''}${val.toFixed(2)}%`
 }
 
 function pctClass(v: number | null | undefined) {

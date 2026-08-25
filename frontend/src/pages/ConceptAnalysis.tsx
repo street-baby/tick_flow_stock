@@ -22,7 +22,7 @@ import { api, type MarketSnapshotRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { storage } from '@/lib/storage'
 import { useMarket } from '@/lib/market'
-import { fmtBigNum, fmtPctValue, priceColorClass } from '@/lib/format'
+import { fmtBigNum, fmtPct, priceColorClass } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { resolveDimension, type DimensionGroup, type StockRow } from '@/lib/analysis-adapter'
 
@@ -186,8 +186,8 @@ function calcConceptStat(group: DimensionGroup, marketMap: Map<string, MarketSna
   const upCount = pctValues.filter(v => v > 0).length
   const downCount = pctValues.filter(v => v < 0).length
   const flatCount = Math.max(0, stocks.length - upCount - downCount)
-  const strongCount = pctValues.filter(v => v >= 5.0).length
-  const weakCount = pctValues.filter(v => v <= -5.0).length
+  const strongCount = pctValues.filter(v => v >= 0.05).length
+  const weakCount = pctValues.filter(v => v <= -0.05).length
   const leader = stocks.length ? [...stocks].sort((a, b) => b.leaderScore - a.leaderScore)[0] : null
   const avgPct = avg(pctValues)
   const medianPct = median(pctValues)
@@ -195,11 +195,11 @@ function calcConceptStat(group: DimensionGroup, marketMap: Map<string, MarketSna
   const amountScore = clamp01(Math.log1p(totalAmount) / Math.log1p(80_000_000_000))
   const strongScore = stocks.length ? clamp01(strongCount / Math.max(1, stocks.length * 0.18)) : 0
   const leaderPart = clamp01((leader?.leaderScore ?? 0) / 100)
-  const avgPart = clamp01((((avgPct ?? 0) / 100) + 0.02) / 0.09)
+  const avgPart = clamp01(((avgPct ?? 0) + 0.02) / 0.09)
   const upPart = clamp01((upRate - 0.35) / 0.55)
 
   const heatScore = (avgPart * 0.38 + upPart * 0.2 + strongScore * 0.16 + amountScore * 0.12 + leaderPart * 0.14) * 100
-  const riskScore = (clamp01((-((avgPct ?? 0) / 100) + 0.01) / 0.08) * 0.55 + clamp01(weakCount / Math.max(1, stocks.length * 0.18)) * 0.45) * 100
+  const riskScore = (clamp01((-(avgPct ?? 0) + 0.01) / 0.08) * 0.55 + clamp01(weakCount / Math.max(1, stocks.length * 0.18)) * 0.45) * 100
 
   return {
     key: group.key,
@@ -470,8 +470,8 @@ function HeroPanel({
 }) {
   return (
     <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-      <HeroMetric icon={TrendingUp} label="最强主线" value={leading?.key ?? '—'} hint={leading?.avgPct != null ? <span className={priceColorClass(leading.avgPct)}>{fmtPctValue(leading.avgPct)}</span> : '等待行情'} tone="up" />
-      <HeroMetric icon={TrendingDown} label="最大风险" value={falling?.key ?? '—'} hint={falling?.avgPct != null ? <span className={priceColorClass(falling.avgPct)}>{fmtPctValue(falling.avgPct)}</span> : '等待行情'} tone="down" />
+      <HeroMetric icon={TrendingUp} label="最强主线" value={leading?.key ?? '—'} hint={leading?.avgPct != null ? <span className={priceColorClass(leading.avgPct)}>{fmtPct(leading.avgPct)}</span> : '等待行情'} tone="up" />
+      <HeroMetric icon={TrendingDown} label="最大风险" value={falling?.key ?? '—'} hint={falling?.avgPct != null ? <span className={priceColorClass(falling.avgPct)}>{fmtPct(falling.avgPct)}</span> : '等待行情'} tone="down" />
       <HeroMetric
         icon={Activity}
         label="涨跌板块"
@@ -594,7 +594,7 @@ function PulseList({
                           <span className="mx-0.5 text-muted/40">/</span>
                           <span className="text-bear">{item.downCount}</span>跌
                         </span>
-                        <span className={cn('ml-auto shrink-0 font-mono text-[10px] tabular-nums', priceColorClass(item.avgPct))}>{item.avgPct != null ? fmtPctValue(item.avgPct) : '—'}</span>
+                        <span className={cn('ml-auto shrink-0 font-mono text-[10px] tabular-nums', priceColorClass(item.avgPct))}>{item.avgPct != null ? fmtPct(item.avgPct) : '—'}</span>
                       </div>
                     </div>
                   </div>
@@ -614,7 +614,7 @@ function PulseList({
                         <span className="flex min-w-0 items-center gap-1">
                           <span className="min-w-0 truncate font-medium">{stock.name || stock.symbol}</span>
                         </span>
-                        <span className={cn('shrink-0 font-mono', priceColorClass(stock.change_pct))}>{stock.change_pct != null ? fmtPctValue(stock.change_pct) : '—'}</span>
+                        <span className={cn('shrink-0 font-mono', priceColorClass(stock.change_pct))}>{stock.change_pct != null ? fmtPct(stock.change_pct) : '—'}</span>
                       </span>
                     ) : <span key={i} className="rounded-md bg-elevated/30 px-1.5 py-0.5 text-[10px] text-muted/40">—</span>
                   })}
@@ -671,7 +671,7 @@ function ConceptRail({
             <button key={item.key} onClick={() => onSelect(item.key)} className={cn('w-full border-b border-border/50 px-2.5 py-2 text-left transition-colors last:border-b-0', active ? 'bg-blue-400/[0.08]' : 'hover:bg-elevated/40')}>
               <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{item.key}</span>
-                <span className={cn('font-mono text-xs', priceColorClass(item.avgPct))}>{item.avgPct != null ? fmtPctValue(item.avgPct) : '—'}</span>
+                <span className={cn('font-mono text-xs', priceColorClass(item.avgPct))}>{item.avgPct != null ? fmtPct(item.avgPct) : '—'}</span>
               </div>
               <div className="mt-1 flex items-center gap-2 text-[10px] text-muted">
                 <span>{item.count}只</span>
@@ -702,15 +702,15 @@ function ConceptFocus({ stat, onStockClick }: { stat: ConceptStat | null; onStoc
             </div>
             <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
               <span>{stat.count} 只成分</span>
-              <span className={priceColorClass(stat.avgPct)}>平均 {stat.avgPct != null ? fmtPctValue(stat.avgPct) : '—'}</span>
+              <span className={priceColorClass(stat.avgPct)}>平均 {stat.avgPct != null ? fmtPct(stat.avgPct) : '—'}</span>
               <span>上涨占比 {(stat.upRate * 100).toFixed(0)}%</span>
               <span>成交额 {fmtBigNum(stat.totalAmount)}</span>
               {stat.avgTurnover != null && <span>均换手 {stat.avgTurnover.toFixed(2)}%</span>}
             </div>
           </div>
           <div className="grid grid-cols-5 gap-2 lg:w-[520px]">
-            <MiniStat label="均涨" value={stat.avgPct != null ? fmtPctValue(stat.avgPct) : '—'} cls={priceColorClass(stat.avgPct)} />
-            <MiniStat label="中位" value={stat.medianPct != null ? fmtPctValue(stat.medianPct) : '—'} cls={priceColorClass(stat.medianPct)} />
+            <MiniStat label="均涨" value={stat.avgPct != null ? fmtPct(stat.avgPct) : '—'} cls={priceColorClass(stat.avgPct)} />
+            <MiniStat label="中位" value={stat.medianPct != null ? fmtPct(stat.medianPct) : '—'} cls={priceColorClass(stat.medianPct)} />
             <MiniStat label="强势" value={`${stat.strongCount}`} cls="text-bull" />
             <MiniStat label="弱势" value={`${stat.weakCount}`} cls="text-bear" />
             <MiniStat label="量比" value={stat.avgVolRatio != null ? stat.avgVolRatio.toFixed(2) : '—'} cls="text-foreground" />
@@ -745,7 +745,7 @@ function ConceptFocus({ stat, onStockClick }: { stat: ConceptStat | null; onStoc
                   <div className="font-medium text-foreground">{s.name || '—'}</div>
                   <div className="font-mono text-[10px] text-muted">{s.symbol}</div>
                 </td>
-                <td className={cn('px-4 py-2 font-mono tabular-nums', priceColorClass(s.change_pct))}>{s.change_pct != null ? fmtPctValue(s.change_pct) : '—'}</td>
+                <td className={cn('px-4 py-2 font-mono tabular-nums', priceColorClass(s.change_pct))}>{s.change_pct != null ? fmtPct(s.change_pct) : '—'}</td>
                 <td className="px-4 py-2 font-mono text-foreground">{s.turnover_rate != null ? `${s.turnover_rate.toFixed(2)}%` : '—'}</td>
                 <td className="px-4 py-2 font-mono text-foreground">{fmtBigNum(s.amount)}</td>
                 <td className="px-4 py-2 font-mono text-foreground">{fmtBigNum(s.float_market_cap ?? s.market_cap)}</td>
@@ -788,7 +788,7 @@ function LeaderStage({ stocks, onStockClick }: { stocks: EnrichedStock[]; onStoc
             <div className="mt-2 truncate text-sm font-medium text-foreground">{stock.name || stock.symbol}</div>
             <div className="mt-0.5 flex items-center justify-between text-[11px]">
               <span className="font-mono text-muted">{stock.symbol}</span>
-              <span className={cn('font-mono', priceColorClass(stock.change_pct))}>{stock.change_pct != null ? fmtPctValue(stock.change_pct) : '—'}</span>
+              <span className={cn('font-mono', priceColorClass(stock.change_pct))}>{stock.change_pct != null ? fmtPct(stock.change_pct) : '—'}</span>
             </div>
           </div>
         ))}

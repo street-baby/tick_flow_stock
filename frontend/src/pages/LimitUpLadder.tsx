@@ -8,7 +8,7 @@ import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { DimensionMembersDialog, type DimensionKind, type DimensionMembersTarget } from '@/components/DimensionMembersDialog'
 import { QK } from '@/lib/queryKeys'
 import { storage } from '@/lib/storage'
-import { fmtPctValue, priceColorClass } from '@/lib/format'
+import { fmtPct, priceColorClass } from '@/lib/format'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { useTheme } from '@/lib/theme'
@@ -369,7 +369,7 @@ const StockCard = React.memo(function StockCard({ stock, extFields, direction, s
         <span className="ml-auto flex items-center gap-1">
           {!isLimitHit ? (
             <span className={`text-[10px] font-semibold tabular-nums ${priceColorClass(stock.change_pct)}`}>
-              {fmtPctValue(stock.change_pct)}
+              {fmtPct(stock.change_pct)}
             </span>
           ) : stock.sealed_status === 'real' && stock.sealed_vol != null ? (
             /* 已修正真封板: 右侧显示封单(量或额, 替代连板数)。

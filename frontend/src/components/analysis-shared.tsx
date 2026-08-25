@@ -29,7 +29,7 @@ import { QK } from '@/lib/queryKeys'
 import { cn } from '@/lib/cn'
 import type { DimensionGroup, QuoteMap } from '@/lib/analysis-adapter'
 import { computeQuoteMetrics } from '@/lib/analysis-adapter'
-import { fmtPctValue, priceColorClass } from '@/lib/format'
+import { fmtPct, priceColorClass } from '@/lib/format'
 import { useDialogBackdrop } from '@/lib/useDialogBackdrop'
 
 // ===== 配置类型 =====
@@ -283,13 +283,13 @@ export function DimensionHeatmap({
                 outline: active ? `1px solid rgba(${r},${gr},${b},0.8)` : 'none',
                 outlineOffset: 1,
               }}
-              title={`${g.key}: ${g.count}只, 涨${qm.upCount}/跌${qm.downCount}, 均幅${qm.avgPct != null ? fmtPctValue(qm.avgPct) : '—'}`}
+              title={`${g.key}: ${g.count}只, 涨${qm.upCount}/跌${qm.downCount}, 均幅${qm.avgPct != null ? fmtPct(qm.avgPct) : '—'}`}
             >
               {g.key}
               <span className="ml-1 opacity-60">{g.count}</span>
               {qm.avgPct != null && (
                 <span className={`ml-1 ${priceColorClass(qm.avgPct)}`} style={{ fontSize: '9px' }}>
-                  {fmtPctValue(qm.avgPct)}
+                  {fmtPct(qm.avgPct)}
                 </span>
               )}
             </button>
@@ -382,7 +382,7 @@ export function DimensionGroupSidebar({
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted">
                 {qm.avgPct != null && (
                   <span className={priceColorClass(qm.avgPct)}>
-                    均幅 {fmtPctValue(qm.avgPct)}
+                    均幅 {fmtPct(qm.avgPct)}
                   </span>
                 )}
                 {qm.upCount + qm.downCount > 0 && (

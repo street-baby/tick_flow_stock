@@ -6,7 +6,7 @@ import { Trash2, RefreshCw, Star, X, Search, LayoutGrid, List, Settings2, Plus, 
 import { api, type KlineRow, type MinuteKlineRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { storage } from '@/lib/storage'
-import { fmtPrice, fmtPctValue, fmtBigNum, priceColorClass, formatExtNumber } from '@/lib/format'
+import { fmtPrice, fmtPct, fmtBigNum, priceColorClass, formatExtNumber } from '@/lib/format'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
@@ -499,7 +499,7 @@ const StockCard = React.memo(function StockCard({
           </span>
           {pct != null && (
             <span className={`shrink-0 inline-flex items-center px-1.5 py-[2px] rounded text-[11px] tabular-nums ${pctBg}`}>
-              {isUp ? '+' : ''}{pct.toFixed(2)}%
+              {fmtPct(pct)}
             </span>
           )}
         </div>
@@ -1344,7 +1344,7 @@ export function Watchlist() {
                   return <td className={`${numCls} ${priceColorClass(pct)}`}>{fmtPrice(price)}</td>
                 }
                 if (key === 'pct') {
-                  return <td className={`${numCls} ${priceColorClass(pct)}`}>{fmtPctValue(pct)}</td>
+                  return <td className={`${numCls} ${priceColorClass(pct)}`}>{fmtPct(pct)}</td>
                 }
                 if (key === 'amount') {
                   return <td className={`${numCls} text-secondary`}>{fmtBigNum(r.rt_amount ?? r.amount)}</td>
