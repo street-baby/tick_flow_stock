@@ -97,7 +97,6 @@ export function Indices() {
   const [linkedPrice, setLinkedPrice] = useState<number | null>(null)
 
   // 分时数据支持: A股支持分时K线
-  const caps = useCapabilities()
   const hasMinuteCap = isCn
 
   const list = useQuery({

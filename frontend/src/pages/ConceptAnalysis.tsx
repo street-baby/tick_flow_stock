@@ -20,8 +20,10 @@ import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { RpsRotationDialog } from '@/components/RpsRotationDialog'
 import { api, type MarketSnapshotRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
+import { storage } from '@/lib/storage'
 import { useMarket } from '@/lib/market'
 import { fmtBigNum, fmtPctValue, priceColorClass } from '@/lib/format'
+import { cn } from '@/lib/cn'
 import { resolveDimension, type DimensionGroup, type StockRow } from '@/lib/analysis-adapter'
 
 const KEYWORDS = ['concept', '概念', 'theme', '题材', '板块']
