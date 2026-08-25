@@ -107,7 +107,18 @@ def index_quotes(
         if not df.is_empty():
             return {"rows": df.to_dicts(), "count": len(df), "source": "realtime"}
 
-    # 优先从在线实时源获取指数即时行情
+    # 1. 优先从智兔数服 (Zhitu) 获取即时行情
+    try:
+        from app.data_providers import custom as custom_sources
+        provider = custom_sources.get_provider("zhitu")
+        if provider and hasattr(provider, "get_index_quotes"):
+            rows = provider.get_index_quotes(symbol_list or ["000001.SH", "399001.SZ", "399006.SZ", "000680.SH", "000688.SH", "000300.SH"])
+            if rows:
+                return {"rows": rows, "count": len(rows), "source": "zhitu"}
+    except Exception as e:
+        logger.debug("智兔指数实时行情获取异常: %s", e)
+
+    # 2. 在线备选实时源获取指数即时行情
     try:
         import httpx
         from app.market_time import cn_now

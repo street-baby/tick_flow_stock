@@ -286,6 +286,15 @@ def _index_quotes(request: Request, as_of: date | None = None) -> list[dict]:
             rows = df.to_dicts()
 
     if not rows and as_of is None:
+        try:
+            from app.data_providers import custom as custom_sources
+            provider = custom_sources.get_provider("zhitu")
+            if provider and hasattr(provider, "get_index_quotes"):
+                rows = provider.get_index_quotes(list(CORE_INDEX_SYMBOLS))
+        except Exception:
+            rows = []
+
+    if not rows and as_of is None:
         rows = _fetch_sina_core_index_quotes()
 
     if not rows:

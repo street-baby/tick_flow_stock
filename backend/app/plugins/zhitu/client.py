@@ -122,6 +122,69 @@ class ZhituClient:
         data = self.get_json("/hz/list/hszs")
         return data if isinstance(data, list) else []
 
+    _index_quotes_cache: dict = {}
+    _index_quotes_ts: float = 0.0
+
+    def fetch_index_quotes(self, symbols: List[str]) -> List[dict]:
+        """获取指数实时点位与行情快照（多线程并发 + 短暂缓存）"""
+        if not symbols:
+            return []
+
+        import time
+        now = time.time()
+        sym_key = ",".join(sorted(symbols))
+        if sym_key in self._index_quotes_cache and (now - self._index_quotes_ts) < 3.0:
+            return self._index_quotes_cache[sym_key]
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        name_map = {
+            "000001.SH": "上证指数",
+            "399001.SZ": "深证成指",
+            "399006.SZ": "创业板指",
+            "000680.SH": "科创综指",
+            "000688.SH": "科创50",
+            "000300.SH": "沪深300",
+            "000016.SH": "上证50",
+            "000905.SH": "中证500",
+            "000852.SH": "中证1000",
+            "399005.SZ": "中小100",
+        }
+
+        def _fetch_one(sym: str) -> Optional[dict]:
+            std = to_standard_code(sym)
+            d1 = self.get_json(f"/hz/history/fsjy/{std}/d")
+            if not d1 or not isinstance(d1, list):
+                return None
+            last_d = d1[-1]
+            m5 = self.get_json(f"/hz/history/fsjy/{std}/5")
+            prev_close = float(last_d.get("pc") or 0.0)
+            last_price = float(m5[-1]["c"]) if m5 and isinstance(m5, list) and len(m5) > 0 else float(last_d.get("c") or 0.0)
+            change_amt = last_price - prev_close if prev_close else 0.0
+            change_pct = (change_amt / prev_close * 100) if prev_close else 0.0
+            return {
+                "symbol": sym,
+                "name": name_map.get(sym, name_map.get(std, sym)),
+                "last_price": last_price,
+                "close": last_price,
+                "prev_close": prev_close,
+                "change_amount": change_amt,
+                "change_pct": change_pct,
+                "amount": float(last_d.get("a") or 0.0),
+                "volume": float(last_d.get("v") or 0.0),
+                "date": last_d.get("t"),
+                "source": "zhitu",
+            }
+
+        with ThreadPoolExecutor(max_workers=min(len(symbols), 8)) as executor:
+            results = list(executor.map(_fetch_one, symbols))
+
+        quotes = [r for r in results if r is not None]
+        if quotes:
+            self._index_quotes_cache[sym_key] = quotes
+            self._index_quotes_ts = now
+        return quotes
+
     def fetch_daily_klines(self, symbol: str, adj: str = "n") -> List[dict]:
         """获取日K线 (adj: n 不复权, f 前复权, b 后复权)"""
         std_code = to_standard_code(symbol)

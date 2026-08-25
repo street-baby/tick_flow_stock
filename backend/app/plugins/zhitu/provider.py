@@ -327,6 +327,11 @@ class ZhituProvider:
         logger.info("智兔 realtime 解析完成: %d 条快照", len(out))
         return out
 
+    # ---- index_quotes (指数实时行情) ----
+    def get_index_quotes(self, symbols: list[str]) -> list[dict]:
+        logger.debug("智兔 index_quotes 拉取: %s", symbols)
+        return self._client.fetch_index_quotes(symbols)
+
     # ---- financials (财务数据) ----
     def get_financials(
         self,
