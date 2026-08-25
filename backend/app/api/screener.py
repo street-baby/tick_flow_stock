@@ -41,6 +41,30 @@ class PresetRequest(BaseModel):
     ext_columns: Optional[str] = None
     asset_type: str = "stock"
     timeframe: str = "1d"
+    market: str = "cn"   # cn | hk | us（多市场扩展）
+
+
+# 港美股不适用的策略：依赖涨跌停/连板信号（A 股专属概念）
+_LIMIT_DEPENDENT_SIGNALS = {
+    "signal_limit_up", "signal_limit_down", "signal_broken_limit_up",
+    "signal_limit_down_recovery",
+}
+
+# 港美股「接近 60 日新高/新低」的容差: 收盘价触及 60 日极值的 99.5% / 100.5%
+# 即算突破。提为常量而非散落字面量 —— 同一语义在新高计数与状态判定两处使用,
+# 分别硬编码会在调参时静默分叉。
+_NEAR_HIGH_RATIO = 0.995
+_NEAR_LOW_RATIO = 1.005
+
+
+def _market_compatible_strategy(meta: dict, market: str) -> bool:
+    """策略是否适用于目标市场。港美股跳过依赖涨停/连板信号的策略。"""
+    if market == "cn":
+        return True
+    entry = {s for s in (meta.get("entry_signals") or [])}
+    exit_ = {s for s in (meta.get("exit_signals") or [])}
+    signals = entry | exit_ | {a.get("field") for a in (meta.get("alerts") or []) if isinstance(a, dict)}
+    return not bool(signals & _LIMIT_DEPENDENT_SIGNALS)
 
 
 def _safe(result_dict: dict) -> dict:
@@ -211,10 +235,11 @@ def _cache_payload_with_ext(cached: dict, ext_values: dict[str, dict[str, Any]])
     return payload
 
 
-def _update_cache_strategy(data_dir, as_of: str, strategy_id: str, safe_data: dict) -> None:
+def _update_cache_strategy(data_dir, as_of: str, strategy_id: str, safe_data: dict,
+                           market: str = "cn") -> None:
     """单跑后更新缓存中该策略的结果，保持缓存与最新计算一致。"""
     from app.services import strategy_cache
-    cached = strategy_cache.read_cache(data_dir)
+    cached = strategy_cache.read_cache(data_dir, market)
     if cached and cached.get("as_of") == as_of:
         results = cached.get("results", {})
         results[strategy_id] = {
@@ -222,7 +247,7 @@ def _update_cache_strategy(data_dir, as_of: str, strategy_id: str, safe_data: di
             "as_of": as_of,
             "rows": safe_data.get("rows", []),
         }
-        strategy_cache.write_cache(data_dir, as_of, results)
+        strategy_cache.write_cache(data_dir, as_of, results, market)
 
 
 @router.get("/strategies")
@@ -230,6 +255,7 @@ def strategies(
     request: Request,
     asset_type: str = Query("stock"),
     timeframe: str = Query("1d"),
+    market: str = Query("cn", description="cn|hk|us"),
 ):
     """兼容策略清单端点；唯一数据源为 StrategyEngine。"""
     data_dir = request.app.state.repo.store.data_dir
@@ -241,6 +267,8 @@ def strategies(
         if asset_type not in meta.get("asset_types", ["stock"]):
             continue
         if timeframe not in meta.get("timeframes", ["1d"]):
+            continue
+        if not _market_compatible_strategy(meta, market):
             continue
         sid = meta["id"]
         overrides = strategy_config.load_override(data_dir, sid)
@@ -276,12 +304,10 @@ def run_custom(req: CustomRequest, request: Request):
 @router.post("/run_preset")
 def run_preset(req: PresetRequest, request: Request):
     repo = request.app.state.repo
-    svc = ScreenerService(repo, asset_type=req.asset_type)
+    svc = ScreenerService(repo, asset_type=req.asset_type, market=req.market)
     as_of = req.as_of or svc.latest_date()
     if not as_of:
-        raise HTTPException(status_code=400, detail="无可用数据日期")
-
-    # 加载用户保存的策略配置
+        raise HTTPException(status_code=400, detail="无可用数据日期")    # 加载用户保存的策略配置
     data_dir = request.app.state.repo.store.data_dir
     ext_values = _load_ext_value_maps(repo, req.ext_columns)
     overrides = strategy_config.load_override(data_dir, req.strategy_id)
@@ -292,6 +318,13 @@ def run_preset(req: PresetRequest, request: Request):
     try:
         if not engine.has(req.strategy_id):
             raise ValueError(f"unknown strategy: {req.strategy_id}")
+        # 港美股跳过依赖涨跌停/连板信号的策略
+        if req.market in ("hk", "us") and not _market_compatible_strategy(
+            engine.get(req.strategy_id).meta, req.market
+        ):
+            raise ValueError(
+                f"strategy {req.strategy_id} 依赖涨停/连板信号,不适用于{req.market.upper()}市场"
+            )
         params = dict(overrides.get("params") or {})
         context = svc.build_strategy_context(
             engine,
@@ -313,21 +346,26 @@ def run_preset(req: PresetRequest, request: Request):
         raise HTTPException(status_code=status_code, detail=str(e)) from e
 
     safe_data = _safe(asdict(result))
-    _update_cache_strategy(data_dir, str(as_of), req.strategy_id, safe_data)
+    _update_cache_strategy(data_dir, str(as_of), req.strategy_id, safe_data, req.market)
 
     return _result_with_ext(safe_data, ext_values)
 
 
-def _cached_with_realtime(request: Request) -> dict:
-    """读取盘后缓存，并用监控引擎的实时结果覆盖同策略。"""
+def _cached_with_realtime(request: Request, market: str = "cn") -> dict:
+    """读取盘后缓存，并用监控引擎的实时结果覆盖同策略。
+
+    实时结果仅由 A 股监控引擎产出, 港美股只返回盘后缓存(不叠加实时)。
+    """
     data_dir = request.app.state.repo.store.data_dir
-    cached = strategy_cache.read_cache(data_dir)
+    cached = strategy_cache.read_cache(data_dir, market)
     if cached is None:
         cached = {"as_of": None, "results": {}, "updated_at": None}
 
     # 叠加监控引擎内存里的实时结果 (若有), 用新鲜数据覆盖同策略的盘后结果
+    # 仅 A 股: 监控引擎的实时结果基于 A 股实时行情算出, 叠加到港美股缓存上会
+    # 把 A 股个股混进港美股结果里。
     monitor_engine = getattr(request.app.state, "monitor_engine", None)
-    if monitor_engine is not None:
+    if market == "cn" and monitor_engine is not None:
         realtime_results = monitor_engine.latest_strategy_results()
         if realtime_results:
             results = dict(cached.get("results") or {})
@@ -345,6 +383,7 @@ def _cached_with_realtime(request: Request) -> dict:
 def get_cached(
     request: Request,
     ext_columns: Optional[str] = Query(None, description="逗号分隔: config_id.field_name"),
+    market: str = Query("cn", description="cn|hk|us"),
 ):
     """读取策略结果缓存, 并叠加监控引擎本轮实时算出的结果。
 
@@ -352,8 +391,11 @@ def get_cached(
     - 监控引擎内存结果 (latest_strategy_results): 实时行情每轮对「加入监控的策略」算出,
       不落盘 (避免与 read_cache 的 mtime 校验冲突), 在此直接叠加覆盖盘后结果。
       被监控的策略拿到新鲜数据, 非监控策略仍用盘后缓存。
+    - 缓存按 market 隔离 (A 股沿用原文件名, 港美股各自独立文件)。
+    - market 未显式传参时可能是 Query 默认对象而非字符串, 先规范化再做比较。
     """
-    cached = _cached_with_realtime(request)
+    market = str(market) or "cn"
+    cached = _cached_with_realtime(request, market)
 
     # 无任何数据 (盘后缓存空 + 无实时结果) → 返回空标记, 前端据此提示
     if not cached.get("results") and cached.get("as_of") is None:
@@ -364,9 +406,13 @@ def get_cached(
 
 
 @router.get("/cached-summary")
-def get_cached_summary(request: Request):
+def get_cached_summary(
+    request: Request,
+    market: str = Query("cn", description="cn|hk|us"),
+):
     """返回策略卡片所需的轻量摘要，不序列化股票明细。"""
-    cached = _cached_with_realtime(request)
+    market = str(market) or "cn"
+    cached = _cached_with_realtime(request, market)
     results = cached.get("results") or {}
     summary = {
         sid: {
@@ -402,9 +448,11 @@ def get_cached_result(
     strategy_id: str,
     request: Request,
     ext_columns: Optional[str] = Query(None, description="逗号分隔: config_id.field_name"),
+    market: str = Query("cn", description="cn|hk|us"),
 ):
     """按需返回单个策略的完整明细及其今日失效行。"""
-    cached = _cached_with_realtime(request)
+    market = str(market) or "cn"
+    cached = _cached_with_realtime(request, market)
     raw_result = (cached.get("results") or {}).get(strategy_id)
     if not isinstance(raw_result, dict):
         return {
@@ -501,7 +549,11 @@ def run_all(request: Request, body: Optional[dict] = None):
     repo = request.app.state.repo
     asset_type = str(body.get("asset_type") or "stock")
     timeframe = str(body.get("timeframe") or "1d")
-    svc = ScreenerService(repo, asset_type=asset_type)
+    # 多市场: 前端一直在请求体里发 market, 但此处此前从未读取 —— 切到港股跑全部
+    # 策略实际返回的是 A 股结果。必须传入 ScreenerService, 否则 enriched 目录
+    # 与最新日期都会落到 A 股。
+    market = str(body.get("market") or "cn")
+    svc = ScreenerService(repo, asset_type=asset_type, market=market)
     engine = getattr(request.app.state, "strategy_engine", None)
     if engine is None:
         raise HTTPException(status_code=503, detail="策略引擎未初始化")
@@ -523,12 +575,22 @@ def run_all(request: Request, body: Optional[dict] = None):
         unknown = [sid for sid in all_ids if not engine.has(sid)]
         if unknown:
             raise HTTPException(status_code=404, detail=f"unknown strategies: {unknown}")
+        # 显式指定的策略同样要做市场兼容过滤: 前端策略池可能含依赖涨跌停/连板的
+        # A 股专属策略, 在港美股上跑只会产出无意义结果。这里静默跳过而不报错 ——
+        # 策略本身是合法的, 只是不适用于当前市场。
+        if market != "cn":
+            meta_by_id = {m["id"]: m for m in engine.list_strategies()}
+            all_ids = [
+                sid for sid in all_ids
+                if _market_compatible_strategy(meta_by_id.get(sid) or {}, market)
+            ]
     else:
         all_ids = [
             meta["id"]
             for meta in engine.list_strategies()
             if asset_type in meta.get("asset_types", ["stock"])
             and timeframe in meta.get("timeframes", ["1d"])
+            and _market_compatible_strategy(meta, market)
         ]
 
     if not all_ids:
@@ -577,7 +639,7 @@ def run_all(request: Request, body: Optional[dict] = None):
     # 写入策略缓存 (供页面秒加载)
     if results:
         try:
-            strategy_cache.write_cache(data_dir, str(as_of), results)
+            strategy_cache.write_cache(data_dir, str(as_of), results, market)
         except Exception:  # noqa: BLE001
             pass
 
@@ -600,6 +662,7 @@ def limit_ladder(
     as_of: Optional[date] = None,
     direction: str = Query("up", description="up=涨停梯队 | down=跌停梯队"),
     ext_columns: Optional[str] = Query(None, description="逗号分隔: config_id.field_name"),
+    market: str = Query("cn", description="cn|hk|us（多市场扩展）"),
 ):
     """连板/连跌梯队 — 按连板数分组, 含三状态。
     返回: tiers = [{ boards, count, stocks: [{symbol,name,change_pct,status,...}] }]
@@ -610,7 +673,13 @@ def limit_ladder(
       status: limit_down=跌停 | recovery=翘板(跌停后回升,含收阳条件) | failed=止跌(昨日跌停今日未跌停也未翘板)
 
     ext_columns: 动态 JOIN 扩展数据, 如 "concept.concept,industry.industry"
+
+    market=hk|us（多市场扩展）: 返回与 A 股同构的 tiers——
+      boards = 20日动量档位(0-5), status = high(60日新高)/momentum(强动量)/volume(放量),
+      counts.up/down = 60日新高/新低数。前端复用 A 股连板梯队 UI。
     """
+    if market in ("hk", "us"):
+        return _limit_ladder_market(request, market, as_of)
     import polars as pl
 
     is_down = direction == "down"
@@ -872,3 +941,114 @@ def _parse_ext_columns(ext_columns: str) -> list[tuple[str, str]]:
             continue
         result.append((config_id, field_name))
     return result
+
+
+# ================================================================
+# 港美股强度梯队（多市场扩展）— 与 A 股连板梯队同构返回
+# ================================================================
+def _limit_ladder_market(request: Request, market: str, as_of: date | None) -> dict:
+    """港美股强度梯队：复用 A 股连板梯队 UI，语义替换。
+
+    - boards = 20日动量档位: ≥25%→5, ≥15%→4, ≥8%→3, ≥3%→2, 其余不显示
+    - status = high(60日新高突破) | momentum(强动量) | volume(放量)
+    - counts.up/down = 60日新高/新低数
+    """
+    import polars as pl
+
+    repo = request.app.state.repo
+    svc = ScreenerService(repo, market=market)
+    as_of = as_of or svc.latest_date()
+    if not as_of:
+        return {"as_of": None, "tiers": [], "counts": {"up": 0, "down": 0},
+                "counts_raw": {"up": 0, "down": 0}, "sealed_ready": False,
+                "sealed_age": None, "sealed_counts": {"real": 0, "fake": 0, "pending": 0},
+                "sealed_counts_up": None, "sealed_counts_down": None, "market": market}
+
+    df = svc._load_enriched_for_date(as_of)
+    if df.is_empty():
+        return {"as_of": str(as_of), "tiers": [], "counts": {"up": 0, "down": 0},
+                "counts_raw": {"up": 0, "down": 0}, "sealed_ready": False,
+                "sealed_age": None, "sealed_counts": {"real": 0, "fake": 0, "pending": 0},
+                "sealed_counts_up": None, "sealed_counts_down": None, "market": market}
+
+    need = ["symbol", "name", "close", "change_pct", "amount", "momentum_20d",
+            "vol_ratio_5d", "high_60d", "low_60d", "signal_n_day_high", "signal_n_day_low"]
+    df = df.select([c for c in need if c in df.columns])
+
+    # 60日新高/新低计数（涨跌切换语义：up=新高榜 down=新低榜）
+    count_up = 0
+    count_down = 0
+    if "signal_n_day_high" in df.columns:
+        count_up = int(df.filter(pl.col("signal_n_day_high").fill_null(False)).height)
+    elif "high_60d" in df.columns and "close" in df.columns:
+        count_up = int((df["close"] >= df["high_60d"].fill_null(0) * _NEAR_HIGH_RATIO).sum())
+    if "signal_n_day_low" in df.columns:
+        count_down = int(df.filter(pl.col("signal_n_day_low").fill_null(False)).height)
+    elif "low_60d" in df.columns and "close" in df.columns:
+        count_down = int((df["close"] <= df["low_60d"].fill_null(0) * _NEAR_LOW_RATIO).sum())
+
+    # 状态计算
+    is_high = pl.lit(False)
+    if "high_60d" in df.columns and "close" in df.columns:
+        is_high = (pl.col("close") >= pl.col("high_60d").fill_null(0) * _NEAR_HIGH_RATIO)
+    if "signal_n_day_high" in df.columns:
+        is_high = is_high | pl.col("signal_n_day_high").fill_null(False)
+    is_volume = pl.lit(False)
+    if "vol_ratio_5d" in df.columns and "change_pct" in df.columns:
+        is_volume = (pl.col("vol_ratio_5d").fill_null(0) >= 1.5) & (pl.col("change_pct").fill_null(0) > 0)
+    is_momentum = pl.lit(False)
+    if "momentum_20d" in df.columns:
+        is_momentum = (pl.col("momentum_20d").fill_null(0) >= 0.03)
+
+    # boards = 20日动量档位
+    # 缺 momentum_20d 时降级为 0（等价于全部落到 otherwise(1)，随后被 boards>=2 过滤掉），
+    # 与上面 is_momentum 的列存在性保护保持一致，避免直接抛 ColumnNotFoundError。
+    mom = pl.col("momentum_20d").fill_null(0) if "momentum_20d" in df.columns else pl.lit(0.0)
+    boards = (pl.when(mom >= 0.25).then(5)
+              .when(mom >= 0.15).then(4)
+              .when(mom >= 0.08).then(3)
+              .when(mom >= 0.03).then(2)
+              .otherwise(1))
+    status = (pl.when(is_high).then(pl.lit("high"))
+              .when(is_volume).then(pl.lit("volume"))
+              .when(is_momentum).then(pl.lit("momentum"))
+              .otherwise(None))
+
+    df = df.with_columns([
+        boards.alias("boards"),
+        status.alias("status"),
+        boards.alias("consecutive_limit_ups"),
+        pl.lit(0).cast(pl.UInt32).alias("consecutive_limit_downs"),
+        pl.lit(None).alias("sealed_status"),
+        pl.lit(None).alias("sealed_vol"),
+    ])
+    # 只有动量档 >=2 的标的进入梯队
+    df = df.filter(pl.col("boards") >= 2)
+
+    rows = df.to_dicts()
+    for r in rows:
+        for k, v in list(r.items()):
+            if isinstance(v, float) and not math.isfinite(v):
+                r[k] = None
+
+    tiers: dict[int, list] = {}
+    for r in rows:
+        n = int(r.get("boards") or 0)
+        tiers.setdefault(n, []).append(r)
+    tier_list = [
+        {"boards": n, "count": len(stocks), "stocks": stocks}
+        for n, stocks in sorted(tiers.items(), key=lambda x: -x[0])
+    ]
+
+    return {
+        "as_of": str(as_of),
+        "tiers": tier_list,
+        "counts": {"up": count_up, "down": count_down},
+        "counts_raw": {"up": count_up, "down": count_down},
+        "sealed_ready": False,
+        "sealed_age": None,
+        "sealed_counts": {"real": 0, "fake": 0, "pending": 0},
+        "sealed_counts_up": None,
+        "sealed_counts_down": None,
+        "market": market,
+    }

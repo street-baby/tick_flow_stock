@@ -17,7 +17,7 @@ export const QK = {
   dataSources:    ['data-sources'] as const,
   quoteStatus:    ['quote-status'] as const,
   quoteInterval:  ['quote-interval'] as const,
-  overviewMarket: (asOf?: string) => ['overview-market', asOf ?? 'latest'] as const,
+  overviewMarket: (asOf?: string, market?: string) => ['overview-market', asOf ?? 'latest', market ?? 'cn'] as const,
   indexQuotes:    ['index-quotes'] as const,
   indexList:      ['index-list'] as const,
 
@@ -34,9 +34,9 @@ export const QK = {
   // Screener
   screener:             ['screener'] as const,
   screenerStrategies:   (assetType: string = 'stock') => ['screener-strategies', assetType] as const,
-  screenerCachedSummary: ['screener-cached', 'summary'] as const,
-  screenerCachedResult: (strategyId: string, asOf?: string, ext?: string) => ['screener-cached', 'strategy', strategyId, asOf ?? '', ext ?? ''] as const,
-  screenerCached:       (asOf?: string, ext?: string) => ['screener-cached', 'all', asOf ?? '', ext ?? ''] as const,
+  screenerCachedSummary: (market: string = 'cn') => ['screener-cached', 'summary', market] as const,
+  screenerCachedResult: (strategyId: string, asOf?: string, ext?: string, market: string = 'cn') => ['screener-cached', 'strategy', strategyId, asOf ?? '', ext ?? '', market] as const,
+  screenerCached:       (asOf?: string, ext?: string, market: string = 'cn') => ['screener-cached', 'all', asOf ?? '', ext ?? '', market] as const,
   screenerKlineBatch:   (symbols: string) => ['screener-kline-batch', symbols] as const,
   marketSnapshot:       ['market-snapshot'] as const,
   limitLadder:          (asOf?: string) => ['limit-ladder', asOf] as const,

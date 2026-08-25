@@ -14,14 +14,14 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
+import { MarketNotSupportedHint } from '@/components/MarketNotSupported'
 import { AnalysisConfigDialog, PresetFetchState, type AnalysisFieldConfig } from '@/components/analysis-shared'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { RpsRotationDialog } from '@/components/RpsRotationDialog'
 import { api, type MarketSnapshotRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
-import { storage } from '@/lib/storage'
+import { useMarket } from '@/lib/market'
 import { fmtBigNum, fmtPctValue, priceColorClass } from '@/lib/format'
-import { cn } from '@/lib/cn'
 import { resolveDimension, type DimensionGroup, type StockRow } from '@/lib/analysis-adapter'
 
 const KEYWORDS = ['concept', '概念', 'theme', '题材', '板块']
@@ -234,6 +234,17 @@ function statSort(mode: SortMode) {
 }
 
 export function ConceptAnalysis() {
+  // 多市场扩展：概念分析基于同花顺概念表（A 股专属），港美股暂不支持
+  const { market } = useMarket()
+  if (market !== 'cn') {
+    return (
+      <MarketNotSupportedHint
+        pageName="概念分析"
+        description="{pageName}基于同花顺概念/行业表（A 股专属数据源），当前市场 {label} 暂不支持。"
+        showGuide={false}
+      />
+    )
+  }
   const [fieldConfig, setFieldConfig] = useState<AnalysisFieldConfig>(loadConfig)
   const [showConfig, setShowConfig] = useState(false)
   const [search, setSearch] = useState('')

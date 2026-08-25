@@ -13,6 +13,7 @@ import {
 } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { storage } from '@/lib/storage'
+import { useMarket } from '@/lib/market'
 import { fmtPct, fmtPrice, priceColorClass } from '@/lib/format'
 import { boardTag } from '@/lib/board'
 import { boardTag as boardBadge } from '@/components/stock-table/primitives'
@@ -910,6 +911,9 @@ export function StrategyBacktest() {
   const [strategyGroup, setStrategyGroup] = useState<StrategyGroup>('all')
   const [symbols, setSymbols] = useState(saved?.symbols ?? '')
   const [assetType, setAssetType] = useState<'stock' | 'etf'>(saved?.assetType ?? 'stock')
+  // 多市场扩展：跟随侧边栏全局市场切换器（useMarket）。页面不再维护局部市场
+  // 状态；saved.market 仅作向后兼容的读取来源，回测运行永远用全局市场。
+  const { market } = useMarket()
   const [start, setStart] = useState(saved?.start ?? THREE_MONTHS_AGO)
   const [end, setEnd] = useState(saved?.end ?? TODAY)
   // 成交口径: 建仓/清仓可独立配置。向后兼容老 matching (派生为 entry=exit=matching)。
@@ -1097,6 +1101,7 @@ export function StrategyBacktest() {
     startBacktest({
       strategy_id: selectedStrategy,
       asset_type: assetType,
+      market,
       symbols: symbols ? symbols.split(',').map(s => s.trim()).filter(Boolean) : null,
       start: start || null,
       end: end || undefined,
@@ -1287,6 +1292,13 @@ export function StrategyBacktest() {
     if (highGranularity && minuteExitTriggerSupported) return
     if (exitFill === 'signal_next_minute') setExitFill('close_t')
   }, [exitFill, highGranularity, minuteExitTriggerSupported])
+
+  // 跟随全局市场切换：切市场即清空所选策略与股票池，防止把上一市场的
+  // 配置/结果带到当前市场。
+  useEffect(() => {
+    setSelectedStrategy(null)
+    setSymbols('')
+  }, [market])
 
   const scoring = useMemo(() => (overrides.scoring ?? {}) as Record<string, number>, [overrides.scoring])
   const scoreMinValue = overrides.score_min == null ? '' : String(overrides.score_min)
@@ -2421,7 +2433,8 @@ export function StrategyBacktest() {
                         </button>
                       ))}
                     </div>
-                    <span className="text-[11px] text-muted/70">ETF 仅技术类策略,读 ETF enriched</span>
+                    <span className="text-[11px] text-muted">市场：{market === 'cn' ? 'A股' : market === 'hk' ? '港股' : '美股'}（跟随侧边栏全局切换器）</span>
+                    <span className="text-[11px] text-muted/70">港美股无涨跌停/连板,费率按市场(港双印花)</span>
                   </div>
                   <StockPoolPicker value={symbols} onChange={setSymbols} assetType={assetType} />
                   <div className="text-[11px] leading-5 text-muted">默认全市场回测，由基础过滤、策略条件和买卖触发器筛选；需要单票调试或自选池回测时再限定股票池。</div>
