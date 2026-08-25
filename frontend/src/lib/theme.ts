@@ -82,18 +82,18 @@ export interface ChartTheme {
 }
 
 const DARK: ChartTheme = {
-  text: '#A1A1AA',
-  textStrong: '#E4E4E7',
-  grid: 'rgba(255,255,255,0.06)',
-  border: '#27272A',
-  crosshair: 'rgba(255,255,255,0.25)',
-  crosshairLabelBg: '#333',
-  tooltipBg: 'rgba(24,24,27,0.95)',
-  tooltipBorder: 'rgba(255,255,255,0.1)',
-  tooltipText: '#E4E4E7',
-  infoBarBg: 'rgba(39,39,42,0.6)',
-  zoomFill: 'rgba(255,255,255,0.06)',
-  fillSubtle: 'rgba(255,255,255,0.04)',
+  text: '#94a3b8',
+  textStrong: '#f8fafc',
+  grid: 'rgba(255,255,255,0.04)',
+  border: 'rgba(255,255,255,0.09)',
+  crosshair: 'rgba(168,85,247,0.5)',
+  crosshairLabelBg: '#1e1b4b',
+  tooltipBg: 'rgba(15,21,35,0.92)',
+  tooltipBorder: 'rgba(168,85,247,0.35)',
+  tooltipText: '#f8fafc',
+  infoBarBg: 'rgba(15,21,35,0.75)',
+  zoomFill: 'rgba(168,85,247,0.1)',
+  fillSubtle: 'rgba(255,255,255,0.03)',
 }
 
 const LIGHT: ChartTheme = {

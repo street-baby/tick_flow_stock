@@ -637,6 +637,17 @@ def limit_ladder(
     if df.is_empty():
         return {"as_of": str(as_of), "tiers": [], "counts": {"up": 0, "down": 0}}
 
+    # 严格过滤有效 A 股标的：排除空名称、港股(5位)、基金等非6位A股股票
+    valid_stock_mask = (
+        pl.col("name").is_not_null()
+        & (pl.col("name").str.strip_chars() != "")
+        & (pl.col("name") != pl.col("symbol"))
+        & pl.col("symbol").str.contains(r"^(?:(?:00[0123]|30[01]|60[0135]|68[89]|920)\d{3}|43\d{4}|83\d{4}|87\d{4})(?:\.(?:SZ|SH|BJ))?$")
+    )
+    df = df.filter(valid_stock_mask)
+    if df.is_empty():
+        return {"as_of": str(as_of), "tiers": [], "counts": {"up": 0, "down": 0}}
+
     # 双方向涨跌停计数(不论当前 direction, 前端始终同时显示)
     count_up_raw = int(df.filter(pl.col("signal_limit_up").fill_null(False)).height) if "signal_limit_up" in df.columns else 0
     count_down_raw = int(df.filter(pl.col("signal_limit_down").fill_null(False)).height) if "signal_limit_down" in df.columns else 0

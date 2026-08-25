@@ -135,16 +135,18 @@ class BacktestService:
         asset_type='etf' 时读 ETF enriched。
         """
         try:
+            from datetime import timedelta
             from app.tickflow.repository import enriched_dirname
+            warmup_start = start - timedelta(days=90)
             enriched_glob = str(self.repo.store.data_dir / enriched_dirname(asset_type) / "**" / "*.parquet")
             df = (
                 scan_enriched_parquet(enriched_glob)
                 .filter(
                     (pl.col("symbol").is_in(symbols))
-                    & (pl.col("date") >= start)
+                    & (pl.col("date") >= warmup_start)
                     & (pl.col("date") <= end)
                 )
-                .sort(["date", "symbol"])
+                .sort(["symbol", "date"])
                 .collect()
             )
         except Exception as e:  # noqa: BLE001
@@ -157,6 +159,7 @@ class BacktestService:
         # 即时计算指标 + 信号
         from app.indicators.pipeline import compute_all
         df = compute_all(df)
+        df = df.filter(pl.col("date") >= start).sort(["date", "symbol"])
 
         # 选择需要的列
         needed_cols = [
@@ -270,15 +273,13 @@ class BacktestService:
             if config.stop_loss_pct is not None:
                 pf_kwargs["sl_stop"] = abs(config.stop_loss_pct)
             if config.max_hold_days is not None:
-                # vectorbt 没有内置 max-hold;用时间退出近似:
-                # 在 max_hold_days 后强制 exit
-                exits_idx = entries.copy()
-                for col in entries.columns:
+                exits_idx = pd.DataFrame(False, index=entries.index, columns=entries.columns)
+                for col_idx, col in enumerate(entries.columns):
                     entry_rows = np.where(entries[col].values)[0]
                     for i in entry_rows:
                         end_i = min(i + config.max_hold_days, len(entries) - 1)
                         if end_i > i:
-                            exits_idx.iloc[end_i][col] = True
+                            exits_idx.iat[end_i, col_idx] = True
                 pf_kwargs["exits"] = (exits | exits_idx).astype(bool)
 
             pf = vbt.Portfolio.from_signals(**pf_kwargs)
@@ -293,43 +294,53 @@ class BacktestService:
                 per_symbol_stats=[],
             )
 
-        # 提取结果
+        # 提取交易记录与核心统计指标
+        trades = []
         try:
-            stats_series = pf.stats(silence_warnings=True)
-            if isinstance(stats_series, pd.DataFrame):
-                # 多列时取 agg
-                stats_dict = stats_series.mean(numeric_only=True).to_dict()
-            else:
-                stats_dict = stats_series.to_dict()
+            trades_df = pf.trades.records_readable
+            if not trades_df.empty:
+                trades = [
+                    {
+                        "symbol": str(t.get("Column", t.get("Symbol", ""))),
+                        "entry_date": str(t.get("Entry Timestamp", t.get("Entry Date", "")))[:10],
+                        "exit_date": str(t.get("Exit Timestamp", t.get("Exit Date", "")))[:10],
+                        "entry_price": float(t.get("Avg Entry Price", t.get("Avg. Entry Price", 0))),
+                        "exit_price": float(t.get("Avg Exit Price", t.get("Avg. Exit Price", 0))),
+                        "pnl_pct": float(t.get("Return", t.get("PnL %", 0))),
+                        "duration": str(t.get("Duration", "")),
+                        "exit_reason": "止损/信号出局",
+                    }
+                    for t in trades_df.to_dict(orient="records")
+                ]
         except Exception:  # noqa: BLE001
-            stats_dict = {}
+            trades = []
+
+        stats_dict = {}
+        try:
+            total_ret_s = pf.total_return()
+            max_dd_s = pf.max_drawdown()
+            total_ret = float(total_ret_s.mean()) if hasattr(total_ret_s, "mean") else float(total_ret_s)
+            max_dd = float(max_dd_s.mean()) if hasattr(max_dd_s, "mean") else float(max_dd_s)
+            stats_dict["total_return_pct"] = round(total_ret * 100, 2)
+            stats_dict["max_drawdown_pct"] = round(max_dd * 100, 2)
+            stats_dict["total_trades"] = len(trades)
+            if trades:
+                wins = [t for t in trades if t["pnl_pct"] > 0]
+                losses = [t for t in trades if t["pnl_pct"] < 0]
+                stats_dict["win_rate_pct"] = round(len(wins) / len(trades) * 100, 2)
+                win_sum = sum(t["pnl_pct"] for t in wins)
+                loss_sum = abs(sum(t["pnl_pct"] for t in losses))
+                stats_dict["profit_factor"] = round(win_sum / loss_sum, 2) if loss_sum > 0 else (10.0 if win_sum > 0 else 0.0)
+                stats_dict["avg_trade_return_pct"] = round(sum(t["pnl_pct"] for t in trades) / len(trades) * 100, 2)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stats calc failed: %s", exc)
 
         # 净值曲线(组合平均)
         equity = pf.value().mean(axis=1) if isinstance(pf.value(), pd.DataFrame) else pf.value()
         equity_curve = [
-            {"date": str(idx.date() if hasattr(idx, "date") else idx), "value": float(v)}
+            {"date": str(idx.date() if hasattr(idx, "date") else idx)[:10], "value": float(v)}
             for idx, v in equity.items() if pd.notna(v)
         ]
-
-        # 交易记录
-        try:
-            trades_df = pf.trades.records_readable
-            trades = trades_df.to_dict(orient="records") if not trades_df.empty else []
-            # 字段名美化
-            trades = [
-                {
-                    "symbol": t.get("Column", t.get("Symbol", "")),
-                    "entry_date": str(t.get("Entry Timestamp", t.get("Entry Date", ""))),
-                    "exit_date": str(t.get("Exit Timestamp", t.get("Exit Date", ""))),
-                    "entry_price": float(t.get("Avg Entry Price", t.get("Avg. Entry Price", 0))),
-                    "exit_price": float(t.get("Avg Exit Price", t.get("Avg. Exit Price", 0))),
-                    "pnl_pct": float(t.get("Return", t.get("PnL %", 0))),
-                    "duration": str(t.get("Duration", "")),
-                }
-                for t in trades
-            ]
-        except Exception:  # noqa: BLE001
-            trades = []
 
         # 每标的统计
         per_symbol = []

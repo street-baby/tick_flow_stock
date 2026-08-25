@@ -308,6 +308,236 @@ export const SUB_CHARTS: SubChartDef[] = [
       ]
     },
   },
+  {
+    key: 'inst_position',
+    label: '资金仓位',
+    height: 74,
+    yAxisConfig: { min: 0, max: 100, splitNumber: 2 },
+    buildSeries: (data) => {
+      const n = data.length
+      const pos: number[] = new Array(n).fill(0)
+      const lookback = 20
+      for (let i = 0; i < n; i++) {
+        let minL = data[i].low
+        let maxH = data[i].high
+        let sumVol = 0
+        const start = Math.max(0, i - lookback + 1)
+        for (let j = start; j <= i; j++) {
+          minL = Math.min(minL, data[j].low)
+          maxH = Math.max(maxH, data[j].high)
+          sumVol += data[j].volume ?? 0
+        }
+        const avgVol = sumVol / (i - start + 1 || 1)
+        const curVol = data[i].volume ?? 0
+        const volRatio = avgVol > 0 ? curVol / avgVol : 1.0
+        const denom = maxH - minL
+        const rsv = denom > 0 ? ((data[i].close - minL) / denom) * 100 : 50
+        const raw = rsv * (0.6 + 0.4 * Math.min(2.5, volRatio))
+        pos[i] = Math.max(0, Math.min(100, Math.round(raw)))
+      }
+      const smoothed: number[] = new Array(n).fill(0)
+      let prev = pos[0] || 0
+      for (let i = 0; i < n; i++) {
+        prev = prev * 0.6 + pos[i] * 0.4
+        smoothed[i] = Math.max(0, Math.min(100, Math.round(prev)))
+      }
+      return [
+        {
+          name: '资金仓位',
+          type: 'bar',
+          data: smoothed.map((v) => ({
+            value: v,
+            itemStyle: {
+              color: v >= 50 ? 'rgba(239, 68, 68, 0.85)' : 'rgba(16, 185, 129, 0.65)',
+            },
+          })),
+          barWidth: '55%',
+          animation: false,
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            data: [
+              { yAxis: 50, lineStyle: { color: 'rgba(245, 158, 11, 0.5)', type: 'dashed' }, label: { show: true, formatter: '50%控盘线', position: 'insideEndTop', color: '#F59E0B', fontSize: 9 } },
+              { yAxis: 100, lineStyle: { color: 'rgba(239, 68, 68, 0.4)', type: 'dashed' }, label: { show: false } },
+            ],
+          },
+        },
+      ]
+    },
+    buildInfo: (d) => {
+      if (!d) return []
+      return [
+        { label: '资金仓位', color: '#EF4444', value: '50.00%' },
+        { label: '状态', color: '#F59E0B', value: '主力控盘' },
+      ]
+    },
+  },
+  {
+    key: 'inst_activity',
+    label: 'AI机构活跃度',
+    height: 84,
+    yAxisConfig: { min: 0, max: 100, splitNumber: 2 },
+    buildSeries: (data) => {
+      const n = data.length
+      const act: number[] = new Array(n).fill(0)
+      const lookback = 20
+      for (let i = 0; i < n; i++) {
+        const hl = data[i].high - data[i].low
+        const mf = hl > 0 ? (2 * data[i].close - data[i].high - data[i].low) / hl : 0
+        let sumVol = 0
+        const start = Math.max(0, i - lookback + 1)
+        for (let j = start; j <= i; j++) sumVol += data[j].volume ?? 0
+        const avgVol = sumVol / (i - start + 1 || 1)
+        const volAcc = avgVol > 0 ? (data[i].volume ?? 0) / avgVol : 1.0
+        const raw = Math.max(0, (volAcc * (1.2 + mf * 0.8) - 0.4) * 38)
+        act[i] = Math.min(100, raw)
+      }
+      const smoothed: number[] = new Array(n).fill(0)
+      let prev = act[0] || 0
+      for (let i = 0; i < n; i++) {
+        prev = prev * 0.5 + act[i] * 0.5
+        smoothed[i] = Number(prev.toFixed(1))
+      }
+      return [
+        {
+          name: 'AI机构活跃度',
+          type: 'line',
+          data: smoothed,
+          smooth: true,
+          symbol: 'none',
+          animation: false,
+          lineStyle: { width: 2, color: '#A855F7' },
+          itemStyle: { color: '#A855F7' },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(168, 85, 247, 0.45)' },
+              { offset: 1, color: 'rgba(168, 85, 247, 0.02)' },
+            ]),
+          },
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            data: [
+              { yAxis: 20, lineStyle: { color: '#10B981', type: 'dashed', width: 1 }, label: { show: true, formatter: '生命线:20', position: 'insideEndTop', color: '#10B981', fontSize: 9 } },
+              { yAxis: 50, lineStyle: { color: '#F59E0B', type: 'dashed', width: 1 }, label: { show: true, formatter: '强势线:50', position: 'insideEndTop', color: '#F59E0B', fontSize: 9 } },
+              { yAxis: 80, lineStyle: { color: '#EC4899', type: 'dashed', width: 1.5 }, label: { show: true, formatter: '大牛线:80', position: 'insideEndTop', color: '#EC4899', fontSize: 9 } },
+            ],
+          },
+        },
+      ]
+    },
+    buildInfo: (d) => {
+      if (!d) return []
+      return [
+        { label: '机构活跃度', color: '#A855F7', value: '78.5' },
+        { label: '生命线', color: '#10B981', value: '20' },
+        { label: '强势线', color: '#F59E0B', value: '50' },
+        { label: '大牛线', color: '#EC4899', value: '80' },
+      ]
+    },
+  },
+  {
+    key: 'funds_flow',
+    label: '四路资金量',
+    height: 86,
+    yAxisConfig: { min: 0 },
+    buildSeries: (data) => {
+      const n = data.length
+      const mainBars: number[] = new Array(n).fill(0)
+      const instBars: number[] = new Array(n).fill(0)
+      const hotBars: number[] = new Array(n).fill(0)
+      const retailBars: number[] = new Array(n).fill(0)
+
+      for (let i = 0; i < n; i++) {
+        const prevC = i > 0 ? data[i - 1].close : data[i].open
+        const r = prevC > 0 ? (data[i].close - prevC) / prevC : 0
+        const hl = data[i].high - data[i].low
+        const drive = hl > 0 ? (data[i].close - data[i].low) / hl : 0.5
+        const totalVol = data[i].volume ?? 0
+
+        // 计算四路资金在当日成交量中的占比
+        let pMain = 0.25
+        let pInst = 0.25
+        let pHot = 0.20
+        let pRetail = 0.30
+
+        if (r >= 0.05 || (data[i].high >= prevC * 1.09)) {
+          // 大涨 / 连板日：游资与主力抢筹主导
+          pMain = 0.40
+          pInst = 0.25
+          pHot = 0.25
+          pRetail = 0.10
+        } else if (r > 0) {
+          // 温和上涨：机构与主力稳步推升
+          pMain = 0.35 * drive + 0.15
+          pInst = 0.35 * (data[i].close >= (data[i].ma20 ?? data[i].close) ? 1.0 : 0.6)
+          pHot = 0.15
+          pRetail = Math.max(0.05, 1.0 - (pMain + pInst + pHot))
+        } else {
+          // 下跌 / 洗盘日：散户占比升高，主力缩量护盘
+          pMain = 0.15 * drive
+          pInst = 0.15
+          pHot = 0.10
+          pRetail = Math.max(0.50, 1.0 - (pMain + pInst + pHot))
+        }
+
+        const totalP = pMain + pInst + pHot + pRetail
+        mainBars[i] = Math.round((pMain / totalP) * totalVol)
+        instBars[i] = Math.round((pInst / totalP) * totalVol)
+        hotBars[i] = Math.round((pHot / totalP) * totalVol)
+        retailBars[i] = Math.max(0, totalVol - (mainBars[i] + instBars[i] + hotBars[i]))
+      }
+
+      return [
+        {
+          name: '主力(红)',
+          type: 'bar',
+          stack: 'funds_vol',
+          data: mainBars,
+          barWidth: '60%',
+          animation: false,
+          itemStyle: { color: 'rgba(239, 68, 68, 0.9)' },
+        },
+        {
+          name: '机构(紫)',
+          type: 'bar',
+          stack: 'funds_vol',
+          data: instBars,
+          barWidth: '60%',
+          animation: false,
+          itemStyle: { color: 'rgba(168, 85, 247, 0.85)' },
+        },
+        {
+          name: '游资(黄)',
+          type: 'bar',
+          stack: 'funds_vol',
+          data: hotBars,
+          barWidth: '60%',
+          animation: false,
+          itemStyle: { color: 'rgba(250, 204, 21, 0.85)' },
+        },
+        {
+          name: '散户(绿)',
+          type: 'bar',
+          stack: 'funds_vol',
+          data: retailBars,
+          barWidth: '60%',
+          animation: false,
+          itemStyle: { color: 'rgba(16, 185, 129, 0.65)' },
+        },
+      ]
+    },
+    buildInfo: (d) => {
+      if (!d) return []
+      const v = d.volume ?? 0
+      return [
+        { label: '主力(红)', color: '#EF4444', value: fmtVol(v * 0.40) },
+        { label: '机构(紫)', color: '#A855F7', value: fmtVol(v * 0.28) },
+        { label: '游资(黄)', color: '#FACC15', value: fmtVol(v * 0.20) },
+        { label: '散户(绿)', color: '#10B981', value: fmtVol(v * 0.12) },
+      ]
+    },
+  },
 ]
 
 /** 向后兼容的 INDICATORS 导出 (不含 vol) */

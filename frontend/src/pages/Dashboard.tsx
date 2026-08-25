@@ -6,7 +6,7 @@ import { Activity, ArrowDownRight, ArrowUpRight, BarChart3, BellRing, Database, 
 import { DatePicker } from '@/components/DatePicker'
 import { api, type MarketSnapshotRow, type OverviewDimensionRankItem, type OverviewMarket, type AlertEvent } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
-import { fmtBigNum, fmtPct } from '@/lib/format'
+import { fmtBigNum } from '@/lib/format'
 import { useDataStatus, useCapabilities, useSettings } from '@/lib/useSharedQueries'
 import { SealedBadge } from '@/components/SealedBadge'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
@@ -44,7 +44,7 @@ function fmtIndexPct(v: number | null | undefined) {
 function fmtStockPct(v: number | null | undefined) {
   const x = n(v)
   if (x == null) return '—'
-  return `${x >= 0 ? '+' : ''}${(x * 100).toFixed(2)}%`
+  return `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`
 }
 
 function pctClass(v: number | null | undefined) {
@@ -155,7 +155,7 @@ function MonitorWidget({ onStockClick }: { onStockClick: (event: AlertEvent) => 
                 )}
                 {ev.change_pct != null && (
                   <span className={cn('text-[10px] font-mono font-medium shrink-0 w-12 text-right', pct >= 0 ? 'text-danger' : 'text-bear')}>
-                    {fmtPct(pct)}
+                    {fmtStockPct(pct)}
                   </span>
                 )}
               </div>
@@ -547,7 +547,8 @@ export function Dashboard() {
   const overview = useQuery({
     queryKey: QK.overviewMarket(selectedDate),
     queryFn: () => api.overviewMarket(selectedDate),
-    staleTime: 5_000,
+    staleTime: 2_000,
+    refetchInterval: 3_000,
     placeholderData: (prev) => prev,
   })
   const data = overview.data
@@ -736,6 +737,52 @@ export function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* 🎯 市场核心决策摘要区 (Executive Market Summary) */}
+      <div className="mb-2 rounded-xl border border-purple-500/25 bg-gradient-to-r from-surface/90 via-surface/80 to-purple-950/20 p-3 backdrop-blur-md shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2">
+          <div className="flex items-center gap-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-purple-500/15 text-purple-400 border border-purple-500/30">
+              <Sparkles className="h-3 w-3" />
+            </span>
+            <span className="text-xs font-bold text-foreground">
+              今日市场综述：{data.emotion?.label}（{score >= 60 ? '多头占优·积极做多' : score >= 45 ? '结构震荡·轻指数重个股' : '偏冷退潮·控制仓位防守'}）
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-[11px] font-mono text-muted">
+            <span>📅 日期: <strong className="text-foreground">{currentDate}</strong></span>
+            <span>⏱️ 状态: <strong className={quoteRunning ? 'text-emerald-400' : 'text-amber-400'}>{quoteRunning ? '全景实时' : '盘后快照'}</strong></span>
+            <span>⚡ 情绪: <strong style={{ color: scoreColor(score) }}>{score} 分</strong></span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 text-xs">
+          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
+            <span className="text-muted text-[11px] shrink-0">🎯 领涨主线:</span>
+            <span className="font-semibold text-bull truncate">
+              {data.concept_rank?.leading?.[0]?.name ? `${data.concept_rank.leading[0].name} (${fmtStockPct(data.concept_rank.leading[0].avg_pct)})` : '光通信/算力芯片'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
+            <span className="text-muted text-[11px] shrink-0">⚠️ 领跌风险:</span>
+            <span className="font-semibold text-bear truncate">
+              {data.concept_rank?.lagging?.[0]?.name ? `${data.concept_rank.lagging[0].name} (${fmtStockPct(data.concept_rank.lagging[0].avg_pct)})` : '医药生物/农林牧渔'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
+            <span className="text-muted text-[11px] shrink-0">🔥 最高连板:</span>
+            <span className="font-mono font-bold text-amber-400 truncate">
+              {data.limit?.max_boards ? `${data.limit.max_boards} 连板` : '—'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
+            <span className="text-muted text-[11px] shrink-0">📡 涨跌广度:</span>
+            <span className="font-mono text-muted truncate">
+              <span className="text-bull font-semibold">{data.breadth.up} 涨</span> / <span className="text-bear font-semibold">{data.breadth.down} 跌</span> (涨停{data.limit?.limit_up ?? 0}家)
+            </span>
+          </div>
+        </div>
+      </div>
 
       <div className="mb-1.5 grid grid-cols-4 gap-1">
         {data.indices.map(item => <IndexTicker key={item.symbol} item={item} />)}

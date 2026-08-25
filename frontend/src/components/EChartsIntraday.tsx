@@ -27,9 +27,11 @@ interface Props {
 }
 
 function fmtTime(dt: string): string {
-  const match = dt.match(/(\d{2}):(\d{2})/)
+  const match = dt.match(/(?:T|\s)?(\d{2}):(\d{2})/)
   if (!match) return dt.slice(11, 16)
-  const h = (parseInt(match[1]) + 8) % 24
+  const rawH = parseInt(match[1], 10)
+  // 若时间已经是北京时间 (9点~15点)，直接使用；若为 UTC 时间 (1点~7点)，加 8 小时转北京时间
+  const h = rawH >= 9 && rawH <= 15 ? rawH : (rawH + 8) % 24
   return `${String(h).padStart(2, '0')}:${match[2]}`
 }
 

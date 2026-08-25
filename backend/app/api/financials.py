@@ -70,18 +70,40 @@ def financial_status(request: Request):
     }
 
 
+def _get_or_fetch_financial(data_dir, table: str, symbol: str | None = None) -> list[dict]:
+    df = get_financial_df(data_dir, table)
+    if symbol and not df.is_empty() and "symbol" in df.columns:
+        sub_df = df.filter(pl.col("symbol") == symbol)
+        if not sub_df.is_empty():
+            return sub_df.to_dicts()
+
+    # 若未在本地落盘或该个股缺失，尝试通过自定义财务数据源按需即时获取完整历史
+    if symbol:
+        from app.services.financial_sync import _financial_is_custom
+        if _financial_is_custom():
+            from app.services import preferences
+            from app.data_providers import custom as custom_sources
+            try:
+                provider = custom_sources.get_provider(preferences.get_financial_provider())
+                fetch_df = provider.get_financials(table, [symbol], latest_only=False)
+                if not fetch_df.is_empty():
+                    return fetch_df.to_dicts()
+            except Exception as e:
+                logger.warning("动态拉取财务数据失败 (%s, %s): %s", symbol, table, e)
+
+    if df.is_empty():
+        return []
+    if symbol and "symbol" in df.columns:
+        df = df.filter(pl.col("symbol") == symbol)
+    return df.to_dicts()
+
+
 @router.get("/metrics")
 def get_metrics(request: Request, symbol: str | None = None):
     """查询核心财务指标。"""
     capset = request.app.state.capabilities
     _require_financial(capset)
-
-    df = get_financial_df(request.app.state.repo.store.data_dir, "metrics")
-    if df.is_empty():
-        return {"data": []}
-    if symbol:
-        df = df.filter(pl.col("symbol") == symbol)
-    return {"data": df.to_dicts()}
+    return {"data": _get_or_fetch_financial(request.app.state.repo.store.data_dir, "metrics", symbol)}
 
 
 @router.get("/income")
@@ -89,13 +111,7 @@ def get_income(request: Request, symbol: str | None = None):
     """查询利润表。"""
     capset = request.app.state.capabilities
     _require_financial(capset)
-
-    df = get_financial_df(request.app.state.repo.store.data_dir, "income")
-    if df.is_empty():
-        return {"data": []}
-    if symbol:
-        df = df.filter(pl.col("symbol") == symbol)
-    return {"data": df.to_dicts()}
+    return {"data": _get_or_fetch_financial(request.app.state.repo.store.data_dir, "income", symbol)}
 
 
 @router.get("/balance-sheet")
@@ -103,13 +119,7 @@ def get_balance_sheet(request: Request, symbol: str | None = None):
     """查询资产负债表。"""
     capset = request.app.state.capabilities
     _require_financial(capset)
-
-    df = get_financial_df(request.app.state.repo.store.data_dir, "balance_sheet")
-    if df.is_empty():
-        return {"data": []}
-    if symbol:
-        df = df.filter(pl.col("symbol") == symbol)
-    return {"data": df.to_dicts()}
+    return {"data": _get_or_fetch_financial(request.app.state.repo.store.data_dir, "balance_sheet", symbol)}
 
 
 @router.get("/cash-flow")
@@ -117,13 +127,7 @@ def get_cash_flow(request: Request, symbol: str | None = None):
     """查询现金流量表。"""
     capset = request.app.state.capabilities
     _require_financial(capset)
-
-    df = get_financial_df(request.app.state.repo.store.data_dir, "cash_flow")
-    if df.is_empty():
-        return {"data": []}
-    if symbol:
-        df = df.filter(pl.col("symbol") == symbol)
-    return {"data": df.to_dicts()}
+    return {"data": _get_or_fetch_financial(request.app.state.repo.store.data_dir, "cash_flow", symbol)}
 
 
 @router.get("/shares")
@@ -131,13 +135,7 @@ def get_shares(request: Request, symbol: str | None = None):
     """查询历史股本表。"""
     capset = request.app.state.capabilities
     _require_financial(capset)
-
-    df = get_financial_df(request.app.state.repo.store.data_dir, "shares")
-    if df.is_empty():
-        return {"data": []}
-    if symbol:
-        df = df.filter(pl.col("symbol") == symbol)
-    return {"data": df.to_dicts()}
+    return {"data": _get_or_fetch_financial(request.app.state.repo.store.data_dir, "shares", symbol)}
 
 
 @router.post("/sync/{table}")

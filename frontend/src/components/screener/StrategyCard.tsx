@@ -21,27 +21,27 @@ const CARD_STYLES: Record<CardSize, {
   icon: string
 }> = {
   mini: {
-    wrap: 'gap-1',
-    card: 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full',
-    name: 'text-[10px]',
+    wrap: 'gap-1.5',
+    card: 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full',
+    name: 'text-[11px]',
     count: 'text-[11px]',
     desc: '',
     icon: 'h-3 w-3',
   },
   normal: {
-    wrap: 'gap-2',
-    card: 'relative inline-flex items-center gap-2 pl-3 pr-12 py-1.5 rounded-lg',
+    wrap: 'gap-2.5',
+    card: 'relative inline-flex items-start pl-3 pr-14 py-2 rounded-xl min-w-[180px] max-w-[260px] shadow-sm',
     name: 'text-xs',
     count: 'text-xs',
-    desc: 'text-[10px] text-muted leading-tight mt-0.5 line-clamp-1 max-w-[120px]',
+    desc: 'text-[10px] text-muted leading-tight mt-1 line-clamp-1 max-w-[180px]',
     icon: 'h-3.5 w-3.5',
   },
   large: {
-    wrap: 'gap-2',
-    card: 'relative inline-flex flex-col items-start pl-3.5 pr-12 py-2.5 rounded-btn min-w-[100px]',
+    wrap: 'gap-3',
+    card: 'relative inline-flex flex-col items-start pl-3.5 pr-14 py-2.5 rounded-xl min-w-[200px] max-w-[280px] shadow-sm',
     name: 'text-xs',
     count: 'text-lg font-mono font-bold tabular-nums',
-    desc: 'text-[10px] text-muted leading-tight mt-0.5 line-clamp-2 max-w-[140px]',
+    desc: 'text-[10px] text-muted leading-tight mt-1 line-clamp-1 max-w-[200px]',
     icon: 'h-3.5 w-3.5',
   },
   hidden: {

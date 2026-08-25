@@ -2350,12 +2350,183 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  /** 保存 AI 生成的策略文件 */
-  strategySaveCode: (strategyId: string, code: string, meta?: { name?: string; description?: string }) =>
-    request<{ ok: boolean; path: string }>('/api/strategies/ai/save', {
+  // ===== News & Tomorrow Catalysts (明天炒什么) =====
+  tomorrowCatalysts: (keyword = '', date = '') => {
+    const qs = new URLSearchParams()
+    if (keyword) qs.set('keyword', keyword)
+    if (date) qs.set('date', date)
+    const s = qs.toString()
+    return request<{ items: TomorrowCatalystItem[]; total: number }>(`/api/news/tomorrow${s ? `?${s}` : ''}`)
+  },
+
+  saveCatalyst: (item: Partial<TomorrowCatalystItem>) =>
+    request<{ status: string; item: TomorrowCatalystItem }>('/api/news/tomorrow', {
       method: 'POST',
-      body: JSON.stringify({ strategy_id: strategyId, code, name: meta?.name ?? '', description: meta?.description ?? '' }),
+      body: JSON.stringify(item),
     }),
+
+  deleteCatalyst: (itemId: string) =>
+    request<{ status: string }>(`/api/news/tomorrow/${encodeURIComponent(itemId)}`, { method: 'DELETE' }),
+
+  newsFlash: (limit = 50) =>
+    request<{ items: NewsFlashItem[]; total: number }>(`/api/news/flash?limit=${limit}`),
+
+  aiGenerateTomorrow: (target_date?: string, prompt?: string) =>
+    request<{ status: string; items: TomorrowCatalystItem[]; raw?: string }>('/api/news/ai-generate', {
+      method: 'POST',
+      body: JSON.stringify({ target_date, prompt }),
+    }),
+
+  morningBrief: () =>
+    request<{ brief: MorningBriefData }>('/api/news/morning-brief'),
+
+  aiGenerateMorningBrief: (target_date?: string, prompt?: string) =>
+    request<{ status: string; brief: MorningBriefData }>('/api/news/morning-brief/ai-generate', {
+      method: 'POST',
+      body: JSON.stringify({ target_date, prompt }),
+    }),
+
+  // ===== 9:25 集合竞价抢筹 =====
+  auctionScreen: (params?: {
+    as_of?: string
+    min_gap_pct?: number
+    max_gap_pct?: number
+    min_mv?: number
+    max_mv?: number
+    max_prev_body_pct?: number
+    include_chinext?: boolean
+    include_star?: boolean
+    only_doji?: boolean
+    use_realtime?: boolean
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.as_of) qs.set('as_of', params.as_of)
+    if (params?.min_gap_pct != null) qs.set('min_gap_pct', String(params.min_gap_pct))
+    if (params?.max_gap_pct != null) qs.set('max_gap_pct', String(params.max_gap_pct))
+    if (params?.min_mv != null) qs.set('min_mv', String(params.min_mv))
+    if (params?.max_mv != null) qs.set('max_mv', String(params.max_mv))
+    if (params?.max_prev_body_pct != null) qs.set('max_prev_body_pct', String(params.max_prev_body_pct))
+    if (params?.include_chinext != null) qs.set('include_chinext', String(params.include_chinext))
+    if (params?.include_star != null) qs.set('include_star', String(params.include_star))
+    if (params?.only_doji != null) qs.set('only_doji', String(params.only_doji))
+    if (params?.use_realtime != null) qs.set('use_realtime', String(params.use_realtime))
+    const s = qs.toString()
+    return request<AuctionScreenResult>(`/api/auction/screen${s ? `?${s}` : ''}`)
+  },
+
+  aiAnalyzeAuction: (rows: AuctionStockRow[], as_of?: string) =>
+    request<AuctionAIAnalysisResult>('/api/auction/ai-analyze', {
+      method: 'POST',
+      body: JSON.stringify({ rows, as_of }),
+    }),
+
+  // ===== 暗盘资金流入排行榜 =====
+  darkpoolRanking: (params?: {
+    as_of?: string
+    min_inflow?: number
+    sort_by?: 'inflow' | 'dai_score' | 'inst_position' | 'amount'
+    limit?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.as_of) qs.set('as_of', params.as_of)
+    if (params?.min_inflow != null) qs.set('min_inflow', String(params.min_inflow))
+    if (params?.sort_by) qs.set('sort_by', params.sort_by)
+    if (params?.limit != null) qs.set('limit', String(params.limit))
+    const s = qs.toString()
+    return request<DarkpoolRankingResponse>(`/api/darkpool/ranking${s ? `?${s}` : ''}`)
+  },
+}
+
+export interface AuctionAIAnalysisItem {
+  symbol: string
+  name: string
+  gap_reason: string
+  catalyst_detail: string
+  logic_rating: string
+  tactics: string
+}
+
+export interface AuctionAIAnalysisResult {
+  market_summary: string
+  items: AuctionAIAnalysisItem[]
+}
+
+export interface AuctionStockRow {
+  symbol: string
+  name: string
+  board: string
+  open: number
+  close_prev: number
+  open_gap_pct: number
+  prev_body_pct: number
+  prev_amplitude: number
+  total_mv: number
+  float_mv: number
+  bidding_amount_wan: number
+  bidding_vol_ratio: number
+  pattern: string
+  pattern_type: 'doji' | 'bull_body' | 'bear_body' | 'super_breakout' | 'core_purple'
+  is_doji: boolean
+  is_super_breakout?: boolean
+  is_core_purple?: boolean
+  test_date?: string
+  test_low?: number
+  defense_days?: number
+  score: number
+}
+
+export interface AuctionScreenResult {
+  as_of: string
+  t1_date: string
+  is_live: boolean
+  total: number
+  stats: {
+    board_counts: Record<string, number>
+    total_bidding_amount_yi: number
+    avg_gap_pct: number
+    doji_count: number
+    core_purple_count?: number
+  }
+  rows: AuctionStockRow[]
+  elapsed_ms: number
+}
+
+export interface MorningBriefData {
+  date: string
+  updated_at: string
+  sentiment: string
+  sentiment_color?: string
+  headline: string
+  overnight_summary: string
+  core_focus: { tag: string; desc: string }[]
+  opening_tactics: string
+}
+
+export interface TomorrowCatalystStock {
+  symbol: string
+  name: string
+  last_price?: number
+  change_pct?: number
+}
+
+export interface TomorrowCatalystItem {
+  id: string
+  date: string
+  date_label: string
+  tag: string
+  title: string
+  summary: string
+  sector_change_pct?: number
+  stocks?: TomorrowCatalystStock[]
+}
+
+export interface NewsFlashItem {
+  id: string
+  time: string
+  tag: string
+  title: string
+  content: string
+  url?: string
 }
 
 // ===== Pipeline =====
@@ -2566,4 +2737,32 @@ export interface AnalysisMenu {
   created_at?: string | null
   updated_at?: string | null
   builtin?: boolean
+}
+
+// ===== 暗盘资金流入排行榜 =====
+export interface DarkpoolRankingRow {
+  symbol: string
+  name: string
+  close: number
+  change_pct: number
+  amount_yi: number
+  turnover_rate: number
+  dark_inflow_wan: number
+  dark_inflow_yi: number
+  dai_score: number
+  inst_position: number
+  inst_activity: number
+  pattern_tags: string[]
+  potential_stars: number
+}
+
+export interface DarkpoolRankingResponse {
+  date: string
+  total_screened: number
+  stats: {
+    total_dark_inflow_yi: number
+    heavy_control_count: number
+    avg_dai_score: number
+  }
+  rows: DarkpoolRankingRow[]
 }

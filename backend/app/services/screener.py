@@ -63,7 +63,14 @@ class ScreenerService:
             if not df_i.is_empty():
                 inst_cols = [c for c in ["symbol", "name", "total_shares", "float_shares"] if c in df_i.columns]
                 if "name" not in df.columns:
-                    df = df.join(df_i.select(inst_cols), on="symbol", how="left")
+                    df = df.join(df_i.select(inst_cols), on="symbol", how="inner" if self.asset_type == "stock" else "left")
+                elif self.asset_type == "stock":
+                    df = df.filter(
+                        pl.col("name").is_not_null()
+                        & (pl.col("name").str.strip_chars() != "")
+                        & (pl.col("name") != pl.col("symbol"))
+                        & pl.col("symbol").is_in(df_i["symbol"])
+                    )
             return df
 
         # 尝试从 repo 级预计算历史缓存中提取目标日期 (仅 stock: 该缓存为股票专用)
@@ -78,7 +85,14 @@ class ScreenerService:
                     if not df_i.is_empty():
                         inst_cols = [c for c in ["symbol", "name", "total_shares", "float_shares"] if c in df_i.columns]
                         if "name" not in df.columns:
-                            df = df.join(df_i.select(inst_cols), on="symbol", how="left")
+                            df = df.join(df_i.select(inst_cols), on="symbol", how="inner")
+                        else:
+                            df = df.filter(
+                                pl.col("name").is_not_null()
+                                & (pl.col("name").str.strip_chars() != "")
+                                & (pl.col("name") != pl.col("symbol"))
+                                & pl.col("symbol").is_in(df_i["symbol"])
+                            )
                     return df
 
         # 历史日期: 从 parquet 读取 14 列, 即时计算指标 (慢路径)
@@ -100,6 +114,19 @@ class ScreenerService:
 
         # 即时计算指标: 需要加载历史窗口作 warmup
         df_full = self._compute_enriched_full(df, target_date)
+        if self.asset_type == "stock":
+            df_i = self.repo.get_instruments_asset(self.asset_type)
+            if not df_i.is_empty():
+                inst_cols = [c for c in ["symbol", "name", "total_shares", "float_shares"] if c in df_i.columns]
+                if "name" not in df_full.columns:
+                    df_full = df_full.join(df_i.select(inst_cols), on="symbol", how="inner")
+                else:
+                    df_full = df_full.filter(
+                        pl.col("name").is_not_null()
+                        & (pl.col("name").str.strip_chars() != "")
+                        & (pl.col("name") != pl.col("symbol"))
+                        & pl.col("symbol").is_in(df_i["symbol"])
+                    )
         return df_full
 
     def load_prior_consecutive(self, as_of: date, consec_col: str) -> pl.DataFrame:

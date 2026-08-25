@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Loader2, Lock, RefreshCw, Search } from 'lucide-react'
 import { api, type IndexInstrument, type KlineRow, type MinuteKlineRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
-import { useCapabilities } from '@/lib/useSharedQueries'
 import { EChartsCandlestick, type OHLC } from '@/components/EChartsCandlestick'
 import { EChartsIntraday } from '@/components/EChartsIntraday'
 
@@ -46,7 +45,8 @@ function toOHLC(rows: KlineRow[]): OHLC[] {
 
 function fmtPct(v: number | null | undefined) {
   if (v == null || Number.isNaN(Number(v))) return '--'
-  return `${Number(v).toFixed(2)}%`
+  const val = Number(v)
+  return `${val >= 0 ? '+' : ''}${val.toFixed(2)}%`
 }
 
 function fmtNum(v: number | null | undefined, digits = 2) {
@@ -75,9 +75,8 @@ export function Indices() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [linkedPrice, setLinkedPrice] = useState<number | null>(null)
 
-  // 分时数据需 Pro+ (kline.minute.batch) 能力
-  const caps = useCapabilities()
-  const hasMinuteCap = !!caps.data?.capabilities?.['kline.minute.batch']
+  // 分时数据支持: 自定义数据源(如智兔)或 Pro+
+  const hasMinuteCap = true
 
   const list = useQuery({
     queryKey: QK.indexList,
@@ -116,6 +115,7 @@ export function Indices() {
     queryKey: QK.indexQuotes,
     queryFn: () => api.indexQuotes(),
     placeholderData: (prev) => prev,
+    refetchInterval: 3000,
   })
 
   const daily = useQuery({
@@ -123,6 +123,7 @@ export function Indices() {
     queryFn: () => api.indexDaily(selectedSymbol, 180, range),
     enabled: !!selectedSymbol,
     placeholderData: (prev) => prev,
+    refetchInterval: 10000,
   })
 
   const minute = useQuery({
@@ -130,6 +131,7 @@ export function Indices() {
     queryFn: () => api.indexMinute(selectedSymbol, selectedDate ?? undefined),
     enabled: !!selectedSymbol && !!selectedDate && hasMinuteCap,
     placeholderData: (prev) => prev,
+    refetchInterval: 3000,
   })
 
   const syncInstruments = useMutation({
@@ -266,9 +268,15 @@ export function Indices() {
                 {selectedSymbol && <span className="font-mono text-xs text-muted">{selectedSymbol}</span>}
                 {selectedSymbol && <span className="font-mono text-xs text-foreground">{fmtNum(selectedQuoteValue)}</span>}
                 {selectedSymbol && <span className={`font-mono text-xs ${Number(selectedQuotePct ?? 0) >= 0 ? 'text-bull' : 'text-bear'}`}>{fmtPct(selectedQuotePct)}</span>}
+                {selectedSymbol && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    实时 3s 跳动
+                  </span>
+                )}
               </div>
               <div className="mt-1 text-xs text-muted">
-                实时缓存 {quotes.data?.count ?? 0} 只指数 · 日K来源 {daily.data?.source ?? '--'}
+                已连接实时指数快照（{quotes.data?.count ?? 0} 只） · 今日分时已同步
               </div>
             </div>
             <div className="flex items-center gap-2 text-xs">

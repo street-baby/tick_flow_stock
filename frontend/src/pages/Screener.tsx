@@ -708,9 +708,13 @@ export function Screener() {
         <section>
           {strategies.isLoading && <div className="text-sm text-muted">加载中…</div>}
           {!strategies.isLoading && visiblePool.length === 0 && (
-            <div className="text-sm text-muted py-4 text-center border border-dashed border-border rounded-btn">
-              策略池为空，点击右上角「策略池」按钮添加策略
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowPoolDialog(true)}
+              className="w-full text-sm text-muted py-6 text-center border border-dashed border-border rounded-btn hover:border-accent hover:text-foreground transition-colors cursor-pointer"
+            >
+              + 策略池为空，点击此处添加「涨停不破」等策略
+            </button>
           )}
           <div className={cardWrapCls(cardSize)}>
             {visiblePool.map(id => {

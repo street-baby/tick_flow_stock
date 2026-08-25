@@ -84,8 +84,36 @@ def get_index_daily(
     info = _index_info(repo, symbol)
 
     df = repo.get_index_daily(symbol, start, end)
-    if not df.is_empty():
-        return {"symbol": symbol, "name": info.get("name"), "index_info": info, "rows": df.to_dicts(), "source": "index_enriched"}
+    rows = df.to_dicts() if not df.is_empty() else []
+
+    # 交易时段实时补齐今日分时合成的日K柱
+    from app.market_time import cn_now
+    today_dt = cn_now().date()
+    if rows and str(rows[-1].get("date"))[:10] < str(today_dt) and end >= today_dt:
+        try:
+            min_df = kline_sync.fetch_minute_single(symbol, today_dt, asset_type="index")
+            if not min_df.is_empty():
+                today_open = float(min_df["open"][0])
+                today_high = float(min_df["high"].max())
+                today_low = float(min_df["low"].min())
+                today_close = float(min_df["close"][-1])
+                today_vol = float(min_df["volume"].sum())
+                today_amt = float(min_df["amount"].sum())
+                rows.append({
+                    "symbol": symbol,
+                    "date": str(today_dt),
+                    "open": today_open,
+                    "high": today_high,
+                    "low": today_low,
+                    "close": today_close,
+                    "volume": today_vol,
+                    "amount": today_amt,
+                })
+        except Exception as e:
+            logger.debug("补齐今日指数日K柱异常: %s", e)
+
+    if rows:
+        return {"symbol": symbol, "name": info.get("name"), "index_info": info, "rows": rows, "source": "index_enriched"}
 
     capset = request.app.state.capabilities
     if not capset.has(Cap.KLINE_DAILY_BATCH):
@@ -112,7 +140,8 @@ def get_index_minute(
     """实时读取指数分钟 K。不写入股票分钟 parquet。"""
     repo = request.app.state.repo
     info = _index_info(repo, symbol)
-    day = trade_date or date.today()
+    from app.market_time import cn_now
+    day = trade_date or cn_now().date()
     df = kline_sync.fetch_minute_single(symbol, day, asset_type="index")
     return {
         "symbol": symbol,

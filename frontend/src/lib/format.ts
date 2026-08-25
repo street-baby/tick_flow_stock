@@ -11,6 +11,15 @@ export function fmtPct(v: number | null | undefined, digits = 2): string {
   return `${sign}${(v * 100).toFixed(digits)}%`
 }
 
+/**
+ * 格式化已为百分比点数的数值 (如 1.38 -> +1.38%, -5.14 -> -5.14%, 20.0 -> +20.00%)
+ */
+export function fmtPctValue(v: number | null | undefined, digits = 2): string {
+  if (v == null || Number.isNaN(v)) return '—'
+  const sign = v > 0 ? '+' : ''
+  return `${sign}${v.toFixed(digits)}%`
+}
+
 export function fmtVolume(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return '—'
   if (v >= 1e8) return `${(v / 1e8).toFixed(2)}亿`

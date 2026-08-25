@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, Suspense } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useQuoteStream, useQuoteStreamStatus } from '@/lib/useQuoteStream'
 import { ToastContainer } from '@/components/Toast'
 import { AlertToastContainer } from '@/components/AlertToast'
@@ -34,6 +34,7 @@ import {
   Tags,
   TrendingUp,
   Flame,
+  Zap,
   BarChart3,
   Gauge,
   Sparkles,
@@ -47,6 +48,8 @@ import {
   Moon,
   X,
   WifiOff,
+  EyeOff,
+  ChevronDown,
 } from 'lucide-react'
 import { Logo } from './Logo'
 import { api, type IndexQuote } from '@/lib/api'
@@ -67,22 +70,59 @@ const CORE_INDEXES = [
 
 type CoreIndex = (typeof CORE_INDEXES)[number]
 
-const nav = [
-  { to: '/',                label: '看板',     icon: LayoutDashboard },
-  { to: '/watchlist',  label: '自选',   icon: Star },
-  { to: '/screener',   label: '策略',   icon: ScanSearch },
-  { to: '/backtest',   label: '回测',   icon: History },
-  { to: '/stock-analysis',    label: '个股分析', icon: TrendingUp },
-  { to: '/limit-ladder', label: '连板梯队', icon: Flame },
-  { to: '/concept-analysis', label: '概念分析', icon: Layers3 },
-  { to: '/industry-analysis', label: '行业分析', icon: Landmark },
-  { to: '/financials', label: '财务分析', icon: FileText },
-  { to: '/monitor', label: '监控中心', icon: RadioTower },
-  { to: '/regime', label: '市场环境', icon: Gauge, badge: 'beta' },
-  { to: '/review',      label: '复盘',   icon: BookOpenCheck },
-  { to: '/indices', label: '指数', icon: BarChart3 },
-  { to: '/data',       label: '数据',   icon: Database },
-] as const
+interface NavItemDef {
+  to: string
+  label: string
+  icon: any
+  badge?: string
+}
+
+interface NavCategoryDef {
+  category: string
+  items: NavItemDef[]
+}
+
+const NAV_GROUPS: NavCategoryDef[] = [
+  {
+    category: '行情',
+    items: [
+      { to: '/', label: '看板', icon: LayoutDashboard },
+      { to: '/watchlist', label: '自选', icon: Star },
+      { to: '/indices', label: '指数', icon: BarChart3 },
+      { to: '/stock-analysis', label: '个股分析', icon: TrendingUp },
+    ],
+  },
+  {
+    category: '策略研究',
+    items: [
+      { to: '/screener', label: '策略', icon: ScanSearch },
+      { to: '/backtest', label: '回测', icon: History },
+      { to: '/monitor', label: '监控中心', icon: RadioTower },
+    ],
+  },
+  {
+    category: '市场分析',
+    items: [
+      { to: '/limit-ladder', label: '连板梯队', icon: Flame },
+      { to: '/concept-analysis', label: '概念分析', icon: Layers3 },
+      { to: '/industry-analysis', label: '行业分析', icon: Landmark },
+      { to: '/financials', label: '财务分析', icon: FileText },
+      { to: '/regime', label: '市场环境', icon: Gauge, badge: 'beta' },
+      { to: '/review', label: '复盘', icon: BookOpenCheck },
+    ],
+  },
+  {
+    category: '实战工具',
+    items: [
+      { to: '/tomorrow-catalysts', label: '明天炒什么', icon: Zap, badge: '热' },
+      { to: '/auction', label: '竞价抢筹', icon: Zap, badge: '9:25' },
+      { to: '/darkpool', label: '暗盘资金', icon: EyeOff, badge: '主力' },
+      { to: '/data', label: '数据', icon: Database },
+    ],
+  },
+]
+
+const nav = NAV_GROUPS.flatMap(g => g.items)
 
 /** 亮/暗主题切换 — 状态存 localStorage, 生效见 lib/theme.ts */
 function ThemeToggle() {
@@ -320,8 +360,29 @@ export function Layout() {
 
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const location = useLocation()
   const version = versionData?.version
   const realtimeEnabled = prefs?.realtime_quotes_enabled ?? false
+
+  // 导航折叠状态 (持久化存 localStorage, 默认全展开)
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('tf_collapsed_nav_groups')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  const toggleGroup = (category: string) => {
+    setCollapsedGroups(prev => {
+      const next = { ...prev, [category]: !prev[category] }
+      try {
+        localStorage.setItem('tf_collapsed_nav_groups', JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
   // Free 档监控限制提示: 可手动关闭, 不持久化 (刷新后恢复显示)
   const [dismissFreeHint, setDismissFreeHint] = useState(false)
   const indicesPinned = prefs?.indices_nav_pinned ?? true
@@ -333,6 +394,7 @@ export function Layout() {
     queryKey: [...QK.indexQuotes, 'sidebar', sidebarIndexSymbols.join(',')] as const,
     queryFn: () => api.indexQuotes(sidebarIndexes.map(p => p.symbol)),
     enabled: showSidebarQuotes && sidebarIndexes.length > 0,
+    refetchInterval: 3_000,
     placeholderData: (prev) => prev,
   })
 
@@ -394,9 +456,23 @@ export function Layout() {
         const byTo = new Map(allNav.map(n => [n.to, n]))
         const ordered = savedOrder
           .map(id => byTo.get(id) ?? byTo.get(`/analysis/${id}`))
-          .filter(Boolean)
-        const seen = new Set(ordered.map(n => n!.to))
-        return [...ordered as typeof allNav, ...allNav.filter(n => !seen.has(n.to))]
+          .filter(Boolean) as NavItem[]
+        const seen = new Set(ordered.map(n => n.to))
+        
+        // 如果暗盘未在 savedOrder 中，插入到竞价抢筹后面或顶部
+        if (!seen.has('/darkpool') && byTo.has('/darkpool')) {
+          const darkItem = byTo.get('/darkpool')!
+          const auctionIdx = ordered.findIndex(item => item.to === '/auction')
+          if (auctionIdx !== -1) {
+            ordered.splice(auctionIdx + 1, 0, darkItem)
+          } else {
+            ordered.splice(3, 0, darkItem)
+          }
+          seen.add('/darkpool')
+        }
+
+        const remaining = allNav.filter(n => !seen.has(n.to))
+        return [...ordered, ...remaining]
       })()
     : allNav
 
@@ -425,33 +501,39 @@ export function Layout() {
   }
 
   return (
-    <div className="h-screen grid grid-cols-[14rem_1fr] bg-base text-foreground overflow-hidden">
-      <aside className="border-r border-border bg-surface flex flex-col h-full min-h-0 overflow-hidden">
-        <div className="px-5 py-5 border-b border-border shrink-0">
-          {/* Brand block — 原创 logo + 等宽 wordmark */}
-          <div className="flex items-center gap-2.5">
-            <Logo
-              size={28}
-              className="shrink-0 drop-shadow-[0_0_8px_rgba(139,92,246,0.5)]"
-              style={{ color: BRAND }}
-            />
-            <div
-              className="font-mono font-bold text-[13px] tracking-[0.06em] text-foreground leading-tight"
-              style={{ textShadow: `0 0 10px ${BRAND}44` }}
-            >
-              <div>TickFlow</div>
-              <div>Stock Panel</div>
+    <div className="h-screen grid grid-cols-[14.5rem_1fr] bg-base text-foreground overflow-hidden">
+      <aside className="border-r border-border/70 bg-surface/75 backdrop-blur-xl flex flex-col h-full min-h-0 overflow-hidden shadow-2xl relative z-10">
+        <div className="px-5 py-4 border-b border-border/60 shrink-0 bg-gradient-to-b from-purple-950/20 via-transparent to-transparent">
+          {/* Brand block — 原创 logo + 量化终极端高科技标识 */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="relative">
+                <Logo
+                  size={28}
+                  className="shrink-0 drop-shadow-[0_0_12px_rgba(168,85,247,0.6)]"
+                  style={{ color: BRAND }}
+                />
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 animate-quant-pulse shadow-[0_0_8px_#10b981]" />
+              </div>
+              <div
+                className="font-bold tracking-[0.04em] text-foreground leading-tight"
+                style={{ textShadow: `0 0 12px ${BRAND}55` }}
+              >
+                <div className="bg-gradient-to-r from-white via-purple-200 to-purple-400 bg-clip-text text-transparent font-sans text-sm font-extrabold tracking-wide">
+                  云之心量化
+                </div>
+                <div className="text-[9px] text-purple-300 font-semibold tracking-widest font-mono">
+                  QUANT TERMINAL
+                </div>
+              </div>
+            </div>
+            
+            {/* 极简行情引擎状态微灯 */}
+            <div className="flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-mono text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.2)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              LIVE
             </div>
           </div>
-
-          <div className="mt-2.5 text-[10px] uppercase tracking-[0.22em] text-secondary">
-            Quant · Terminal
-          </div>
-
-          <div
-            className="mt-3 h-px"
-            style={{ background: `linear-gradient(90deg, ${BRAND}88, transparent 80%)` }}
-          />
 
           <TierBadge
             label={caps?.label ?? ''}
@@ -463,42 +545,104 @@ export function Layout() {
           />
         </div>
 
-        <nav className="flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-0.5">
-          {visibleNavItems.map(({ to, label, icon: Icon, badge }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 px-3 py-2 rounded-btn text-sm transition-colors duration-150 ease-smooth',
-                  isActive
-                    ? 'bg-elevated text-foreground font-medium'
-                    : 'text-foreground/80 hover:bg-elevated hover:text-foreground',
-                )
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="flex-1">{label}</span>
-                  {badge && (
-                    <span className="ml-auto inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400 shrink-0">
-                      {badge}
+        <nav className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-2 scrollbar-thin">
+          {NAV_GROUPS.map((group) => {
+            const groupVisibleItems = group.items.filter(item => 
+              visibleNavItems.some(v => v.to === item.to)
+            )
+            if (groupVisibleItems.length === 0) return null
+
+            // 检查当前激活路由是否在该组内
+            const hasActiveChild = groupVisibleItems.some(item => 
+              item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to)
+            )
+
+            const isCollapsed = !!collapsedGroups[group.category]
+
+            return (
+              <div key={group.category} className="space-y-0.5 select-none">
+                {/* 可点击折叠的分类标题栏 */}
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.category)}
+                  className="w-full px-2 py-1 rounded-lg text-[10px] font-bold text-muted/75 hover:text-foreground tracking-wider uppercase font-mono flex items-center justify-between transition-colors hover:bg-elevated/40 cursor-pointer group"
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{group.category}</span>
+                    {/* 折叠时若内部有当前活跃路由，显示微光提示点 */}
+                    {isCollapsed && hasActiveChild && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-purple-400 animate-pulse shadow-[0_0_6px_#a855f7]" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] font-normal text-muted/50 group-hover:text-muted/80 font-sans">
+                      {groupVisibleItems.length}
                     </span>
+                    <ChevronDown className={cn(
+                      'h-3 w-3 text-muted/70 transition-transform duration-200 group-hover:text-foreground',
+                      isCollapsed ? '-rotate-90' : 'rotate-0'
+                    )} />
+                  </div>
+                </button>
+
+                {/* 折叠动画容器 */}
+                <AnimatePresence initial={false}>
+                  {!isCollapsed && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                      className="space-y-0.5 overflow-hidden"
+                    >
+                      {groupVisibleItems.map(({ to, label, icon: Icon, badge }) => (
+                        <NavLink
+                          key={to}
+                          to={to}
+                          className={({ isActive }) =>
+                            cn(
+                              'group relative flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200',
+                              isActive
+                                ? 'bg-gradient-to-r from-purple-500/20 via-purple-500/10 to-transparent text-purple-200 font-semibold border-l-2 border-purple-400 shadow-[inset_0_0_12px_rgba(168,85,247,0.15)] pl-3.5'
+                                : 'text-foreground/75 hover:bg-elevated/70 hover:text-foreground hover:translate-x-0.5',
+                            )
+                          }
+                        >
+                          {({ isActive }) => (
+                            <>
+                              <Icon className={cn('h-4 w-4 shrink-0 transition-transform group-hover:scale-110 duration-200', isActive ? 'text-purple-400' : 'text-muted group-hover:text-foreground')} />
+                              <span className="flex-1 tracking-wide">{label}</span>
+                              {badge && (
+                                <span className={cn(
+                                  'ml-auto inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider shrink-0 transition-all',
+                                  badge === '热' || badge === '主力'
+                                    ? 'border border-red-500/40 bg-red-500/15 text-red-300 shadow-[0_0_8px_rgba(239,68,68,0.25)]'
+                                    : badge === '9:25'
+                                    ? 'border border-amber-400/40 bg-amber-400/15 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.25)]'
+                                    : 'border border-purple-400/30 bg-purple-400/10 text-purple-300'
+                                )}>
+                                  {badge}
+                                </span>
+                              )}
+                              {/* 数据同步状态: 同步中转圈, 刚完成显示绿色对勾闪烁 3 秒 */}
+                              {to === '/data' && isDataSyncing && (
+                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-accent" />
+                              )}
+                              {to === '/data' && !isDataSyncing && dataSyncJustDone && (
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-bull animate-pulse" />
+                              )}
+                              {/* 监控中心徽标: 仅非监控页且有未读时显示 */}
+                              {to === '/monitor' && <MonitorBadge active={isActive} />}
+                            </>
+                          )}
+                        </NavLink>
+                      ))}
+                    </motion.div>
                   )}
-                  {/* 数据同步状态: 同步中转圈, 刚完成显示绿色对勾闪烁 3 秒 */}
-                  {to === '/data' && isDataSyncing && (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-accent" />
-                  )}
-                  {to === '/data' && !isDataSyncing && dataSyncJustDone && (
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-bull animate-pulse" />
-                  )}
-                  {/* 监控中心徽标: 仅非监控页且有未读时显示 */}
-                  {to === '/monitor' && <MonitorBadge active={isActive} />}
-                </>
-              )}
-            </NavLink>
-          ))}
+                </AnimatePresence>
+              </div>
+            )
+          })}
         </nav>
 
         {/* 数据源状态条 */}

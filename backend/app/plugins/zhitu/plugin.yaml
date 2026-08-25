@@ -1,0 +1,10 @@
+# 智兔数服 (Zhitu API) 官方行情数据源插件
+
+name: zhitu
+display_name: "智兔数服（Zhitu API）"
+runtime: python
+entry: app.plugins.zhitu.provider:ZhituProvider
+check: app.plugins.zhitu.provider:availability
+datasets: [daily, adj_factor, minute, realtime, financial]
+description: "智兔数服金融数据 API（A 股全市场行情、日K/分钟K历史、毫秒级全市场实时快照、五档盘口、财务报表、板块与资金流）。"
+install_hint: "无需额外安装依赖，仅需配置 ZHITU_API_TOKEN。"

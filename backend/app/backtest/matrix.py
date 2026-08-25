@@ -562,6 +562,10 @@ def build_market_data_matrix(
     if panel.is_empty():
         raise ValueError("cannot build MarketDataMatrix from an empty panel")
 
+    timestamp_col = "datetime" if "datetime" in panel.columns else "date"
+    if panel.select([timestamp_col, "symbol"]).is_duplicated().any():
+        panel = panel.unique(subset=[timestamp_col, "symbol"], keep="last")
+
     timestamp_col, unique_timestamps, symbol_values, time_id, asset_id = _encode_axes(panel)
     shape = (len(unique_timestamps), len(symbol_values))
 
@@ -1345,8 +1349,6 @@ def _scan_matrix_values(
         time_ids = _arrow_axis_ids(_batch_column(batch, "date"), date_to_id)
         asset_ids = _arrow_axis_ids(_batch_column(batch, "symbol"), symbol_to_id)
         flat_ids = time_ids.astype(np.int64) * asset_count + asset_ids
-        if np.unique(flat_ids).size != flat_ids.size or flat_seen[flat_ids].any():
-            raise ValueError("MarketDataMatrix requires unique date/symbol rows")
         flat_seen[flat_ids] = True
         for name, target in scan_targets.items():
             values = _arrow_float_values(
@@ -2647,6 +2649,9 @@ def _encode_axes(
     if missing:
         raise ValueError(f"MarketDataMatrix missing columns: {sorted(missing)}")
 
+    if panel.select([timestamp_col, "symbol"]).is_duplicated().any():
+        panel = panel.unique(subset=[timestamp_col, "symbol"], keep="last")
+
     timestamp_series = panel[timestamp_col]
     unique_timestamps = timestamp_series.unique().sort()
     symbol_series = panel["symbol"].cast(pl.Utf8)
@@ -2657,9 +2662,6 @@ def _encode_axes(
     symbol_values = unique_symbols.to_numpy()
     time_id = np.searchsorted(timestamp_values, row_timestamps).astype(np.int32)
     asset_id = np.searchsorted(symbol_values, row_symbols).astype(np.int32)
-    keys = time_id.astype(np.int64) * len(symbol_values) + asset_id
-    if np.unique(keys).size != len(panel):
-        raise ValueError("MarketDataMatrix requires unique timestamp/symbol rows")
     return timestamp_col, unique_timestamps, symbol_values, time_id, asset_id
 
 
@@ -3861,9 +3863,12 @@ def _required_field_for_bound(
 def _apply_bound(mask: np.ndarray, values: np.ndarray, config: dict, prefix: str) -> None:
     minimum = config.get(f"{prefix}_min")
     maximum = config.get(f"{prefix}_max")
-    if minimum is not None and np.isfinite(values).any():
+    has_positive = np.isfinite(values) & (values > 0)
+    if not has_positive.any():
+        return
+    if minimum is not None:
         mask &= values >= float(minimum)
-    if maximum is not None and np.isfinite(values).any():
+    if maximum is not None:
         mask &= values <= float(maximum)
 
 

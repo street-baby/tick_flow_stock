@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # TickFlow
     tickflow_api_key: str = Field(default="", description="留空启用 free 模式")
 
+    # Zhitu
+    zhitu_api_token: str = Field(default="", description="智兔 API Token 证书")
+    zhitu_base_url: str = Field(default="https://api.zhituapi.com", description="智兔 API Base URL")
+
     # AI
     ai_provider: str = "openai_compat"
     ai_base_url: str = "https://api.zhaji.dev/v1"

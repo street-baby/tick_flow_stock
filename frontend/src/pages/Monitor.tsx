@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/data/Skeleton'
 import { api, type MonitorRule, type AlertEvent, type MonitorCondition, type MonitorExtFieldItem } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
-import { fmtPrice, fmtPct } from '@/lib/format'
+import { fmtPrice, fmtPctValue } from '@/lib/format'
 import { useDialogBackdrop } from '@/lib/useDialogBackdrop'
 import { cn } from '@/lib/cn'
 import { cnSignal } from '@/lib/signals'
@@ -403,7 +403,7 @@ function AlertsList({ alertsQuery, confirmClear, setConfirmClear, total, enterTs
                           {ev.change_pct != null && (
                             <span className={cn('text-[11px] font-mono font-medium',
                               _pct >= 0 ? 'text-danger' : 'text-bear')}>
-                              {fmtPct(_pct)}
+                              {fmtPctValue(_pct)}
                             </span>
                           )}
                           <span className={cn('rounded border px-1.5 py-0.5 text-[9px] font-medium', SOURCE_BADGE_STYLE.strategy)}>
@@ -482,7 +482,7 @@ function AlertsList({ alertsQuery, confirmClear, setConfirmClear, total, enterTs
                         {ev.change_pct != null && (
                           <span className={cn('text-[11px] font-mono font-medium',
                             ev.change_pct >= 0 ? 'text-danger' : 'text-bear')}>
-                            {fmtPct(ev.change_pct)}
+                            {fmtPctValue(ev.change_pct)}
                           </span>
                         )}
                         <span className={cn('rounded border px-1.5 py-0.5 text-[9px] font-medium', SOURCE_BADGE_STYLE[ev.source] ?? 'bg-elevated text-muted border-border')}>

@@ -1,8 +1,23 @@
 import { useState, useCallback, useEffect } from 'react'
 import { storage } from '@/lib/storage'
 
+const DEFAULT_INITIAL_POOL = [
+  'twin_limit_up_cannon',
+  'inst_activity_breakout',
+  'ma20_pullback_doji',
+  'limit_up_hold_above',
+  'huge_vol_pullback_ma20',
+  'limit_up_momentum',
+  'broken_board_recovery',
+  'trend_breakout',
+  'ma_golden_cross',
+]
+
 export function useStrategyPool() {
-  const [pool, setPool] = useState<string[]>(() => storage.strategyPool.get([]))
+  const [pool, setPool] = useState<string[]>(() => {
+    const saved = storage.strategyPool.get([])
+    return saved && saved.length > 0 ? saved : DEFAULT_INITIAL_POOL
+  })
 
   // 同步写入 localStorage
   useEffect(() => { storage.strategyPool.set(pool) }, [pool])

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bell, TrendingUp, TrendingDown, X } from 'lucide-react'
 import type { AlertEvent } from '@/lib/api'
-import { fmtPct, fmtPrice } from '@/lib/format'
+import { fmtPctValue, fmtPrice } from '@/lib/format'
 import { cnSignal } from '@/lib/signals'
 import { cn } from '@/lib/cn'
 import { playNotificationSound } from '@/lib/notificationSound'
@@ -171,7 +171,7 @@ export function AlertToastContainer() {
                 {ev.change_pct != null && (
                   <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-mono font-medium shrink-0', pct >= 0 ? 'text-danger' : 'text-bear')}>
                     {pct >= 0 ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
-                    {fmtPct(pct)}
+                    {fmtPctValue(pct)}
                   </span>
                 )}
                 <button aria-label="关闭通知" onClick={(e) => { e.stopPropagation(); dismiss(item.id) }} className="shrink-0 p-0.5 rounded text-muted/50 hover:text-foreground hover:bg-elevated transition-colors cursor-pointer">

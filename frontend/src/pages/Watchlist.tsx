@@ -6,7 +6,7 @@ import { Trash2, RefreshCw, Star, X, Search, LayoutGrid, List, Settings2, Plus, 
 import { api, type KlineRow, type MinuteKlineRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { storage } from '@/lib/storage'
-import { fmtPrice, fmtPct, fmtBigNum, priceColorClass, formatExtNumber } from '@/lib/format'
+import { fmtPrice, fmtPctValue, fmtBigNum, priceColorClass, formatExtNumber } from '@/lib/format'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
@@ -1344,7 +1344,7 @@ export function Watchlist() {
                   return <td className={`${numCls} ${priceColorClass(pct)}`}>{fmtPrice(price)}</td>
                 }
                 if (key === 'pct') {
-                  return <td className={`${numCls} ${priceColorClass(pct)}`}>{fmtPct(pct)}</td>
+                  return <td className={`${numCls} ${priceColorClass(pct)}`}>{fmtPctValue(pct)}</td>
                 }
                 if (key === 'amount') {
                   return <td className={`${numCls} text-secondary`}>{fmtBigNum(r.rt_amount ?? r.amount)}</td>

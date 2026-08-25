@@ -8,7 +8,7 @@ import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { DimensionMembersDialog, type DimensionKind, type DimensionMembersTarget } from '@/components/DimensionMembersDialog'
 import { QK } from '@/lib/queryKeys'
 import { storage } from '@/lib/storage'
-import { fmtPct, priceColorClass } from '@/lib/format'
+import { fmtPctValue, priceColorClass } from '@/lib/format'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { useTheme } from '@/lib/theme'
@@ -329,7 +329,7 @@ const StockCard = React.memo(function StockCard({ stock, extFields, direction, s
         <span className="ml-auto flex items-center gap-1">
           {!isLimitHit ? (
             <span className={`text-[10px] font-semibold tabular-nums ${priceColorClass(stock.change_pct)}`}>
-              {fmtPct(stock.change_pct)}
+              {fmtPctValue(stock.change_pct)}
             </span>
           ) : stock.sealed_status === 'real' && stock.sealed_vol != null ? (
             /* 已修正真封板: 右侧显示封单(量或额, 替代连板数)。
@@ -687,7 +687,6 @@ function isStatusKey(key: FilterKey): boolean {
 
 function filterTiers(tiers: LimitLadderTier[], keys: Set<FilterKey>, bf?: BrokenFailedConfig): LimitLadderTier[] {
   const cfg = { ...DEFAULT_BF, ...bf }
-  if (keys.size === 0) return tiers
 
   const statusKeys = [...keys].filter(isStatusKey)
   const boardKeys = [...keys].filter(k => !isStatusKey(k))
@@ -696,6 +695,14 @@ function filterTiers(tiers: LimitLadderTier[], keys: Set<FilterKey>, bf?: Broken
     .map(t => ({
       ...t,
       stocks: t.stocks.filter(s => {
+        // 严格过滤无名称或非 6 位 A 股代码的标的（如 5 位港股代码或基金代码）
+        const hasValidName = !!s.name && s.name.trim() !== '' && s.name !== s.symbol
+        const cleanCode = s.symbol.replace(/\.(SH|SZ|BJ)$/i, '')
+        const isSixDigits = /^\d{6}$/.test(cleanCode)
+        if (!hasValidName || !isSixDigits) return false
+
+        if (keys.size === 0) return true
+
         // 炸板/翘板：先按 boards 阈值过滤 (broken 涨停侧, recovery 跌停侧共用 broken 配置)
         const isBrokenLike = s.status === 'broken' || s.status === 'recovery'
         if (isBrokenLike && (cfg.brokenMinBoards ?? 0) > 0 && t.boards < (cfg.brokenMinBoards ?? 0)) return false
