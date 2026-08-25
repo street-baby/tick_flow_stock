@@ -35,26 +35,37 @@ def _market_of_exchange(exchange: str) -> str:
     return "cn"
 
 
+def _clean_float(v: Any) -> float | None:
+    if v is None or v == "" or v == "-":
+        return None
+    try:
+        import math
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _flatten_instruments(items: list[dict]) -> list[dict]:
     """把 SDK 返回的 Instrument 列表 flatten 成扁平行。"""
     rows = []
     for item in items:
-        row = {
-            "symbol": item.get("symbol"),
-            "name": item.get("name"),
-            "code": item.get("code"),
-            "exchange": item.get("exchange"),
-            "region": item.get("region"),
-            "type": item.get("type"),
-        }
-        row["market"] = _market_of_exchange(item.get("exchange") or "")
         ext = item.get("ext") or {}
-        row["listing_date"] = ext.get("listing_date")
-        row["total_shares"] = ext.get("total_shares")
-        row["float_shares"] = ext.get("float_shares")
-        row["tick_size"] = ext.get("tick_size")
-        row["limit_up"] = ext.get("limit_up")
-        row["limit_down"] = ext.get("limit_down")
+        row = {
+            "symbol": str(item.get("symbol") or ""),
+            "name": str(item.get("name") or ""),
+            "code": str(item.get("code") or ""),
+            "exchange": str(item.get("exchange") or ""),
+            "region": str(item.get("region") or ""),
+            "type": str(item.get("type") or "stock"),
+            "market": _market_of_exchange(str(item.get("exchange") or "")),
+            "listing_date": str(ext.get("listing_date") or item.get("listing_date") or "") or None,
+            "total_shares": _clean_float(ext.get("total_shares") if ext.get("total_shares") is not None else item.get("total_shares")),
+            "float_shares": _clean_float(ext.get("float_shares") if ext.get("float_shares") is not None else item.get("float_shares")),
+            "tick_size": _clean_float(ext.get("tick_size") if ext.get("tick_size") is not None else item.get("tick_size")),
+            "limit_up": _clean_float(ext.get("limit_up") if ext.get("limit_up") is not None else item.get("limit_up")),
+            "limit_down": _clean_float(ext.get("limit_down") if ext.get("limit_down") is not None else item.get("limit_down")),
+        }
         rows.append(row)
     return rows
 
@@ -98,12 +109,21 @@ def sync_instruments(data_dir: Path, markets: list[str] | None = None) -> int:
     if markets is None:
         markets = list(ALL_MARKETS)
 
-    all_rows = _fetch_instruments_via_provider()
-    if all_rows is None:
-        # 未命中非 tickflow provider → 走 tickflow 直连
+    all_rows = []
+    synced_markets = set()
+
+    # 1. 尝试通过自定义数据源 (如智兔) 获取 A 股 / cn
+    if "cn" in markets:
+        cn_rows = _fetch_instruments_via_provider()
+        if cn_rows:
+            all_rows.extend(cn_rows)
+            synced_markets.add("cn")
+
+    # 2. 补充尚未获取的市场（如 hk, us 或未配置自定义源时的 cn）
+    remaining_markets = [m for m in markets if m not in synced_markets]
+    if remaining_markets:
         tf = get_client()
-        all_rows = []
-        for market in markets:
+        for market in remaining_markets:
             for ex in get_market(market).exchanges:
                 try:
                     items = tf.exchanges.get_instruments(ex, instrument_type="stock")
@@ -116,7 +136,7 @@ def sync_instruments(data_dir: Path, markets: list[str] | None = None) -> int:
     if not all_rows:
         return 0
 
-    df = pl.DataFrame(all_rows)
+    df = pl.DataFrame(all_rows, infer_schema_length=None)
     df = df.with_columns(pl.lit(date.today()).alias("as_of"))
 
     out = data_dir / "instruments" / "instruments.parquet"

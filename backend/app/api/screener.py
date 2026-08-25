@@ -32,6 +32,7 @@ class CustomRequest(BaseModel):
     as_of: Optional[date] = None
     ext_columns: Optional[str] = None
     asset_type: str = "stock"
+    market: str = "cn"
 
 
 class PresetRequest(BaseModel):
@@ -284,7 +285,7 @@ def strategies(
 @router.post("/run")
 def run_custom(req: CustomRequest, request: Request):
     repo = request.app.state.repo
-    svc = ScreenerService(repo, asset_type=req.asset_type)
+    svc = ScreenerService(repo, asset_type=req.asset_type, market=req.market)
     as_of = req.as_of or svc.latest_date()
     if not as_of:
         raise HTTPException(status_code=400,

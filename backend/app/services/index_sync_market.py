@@ -233,3 +233,48 @@ def list_market_indices(market: str) -> list[dict]:
         {"symbol": s, "name": n, "code": c, "market": market, "type": "index"}
         for s, n, source, c in MARKET_INDICES.get(market, [])
     ]
+
+
+def get_market_index_quotes(market: str, data_dir: Path) -> list[dict]:
+    """读取市场指数最新日报价/快照。"""
+    daily_dir = Path(data_dir) / f"kline_index_daily_{market}"
+    if not daily_dir.exists():
+        return []
+    quotes: list[dict] = []
+    for symbol, name, source, code in MARKET_INDICES.get(market, []):
+        try:
+            files = sorted(daily_dir.glob(f"**/{symbol}.parquet"))
+            if not files:
+                files = sorted(daily_dir.glob(f"latest_{symbol}.parquet"))
+            if not files:
+                continue
+            df = pl.read_parquet(files[-1])
+            if df.is_empty():
+                continue
+            last_row = df.tail(1).to_dicts()[0]
+            prev_close = None
+            if len(df) > 1:
+                prev_close = float(df.tail(2).to_dicts()[0].get("close") or 0.0)
+            elif len(files) > 1:
+                df_prev = pl.read_parquet(files[-2])
+                if not df_prev.is_empty():
+                    prev_close = float(df_prev.tail(1).to_dicts()[0].get("close") or 0.0)
+            close = float(last_row.get("close") or 0.0)
+            chg_pct = float(last_row.get("change_pct") or 0.0)
+            if chg_pct == 0.0 and prev_close and prev_close > 0:
+                chg_pct = (close - prev_close) / prev_close
+            pct_val = chg_pct * 100 if abs(chg_pct) < 1 else chg_pct
+            quotes.append({
+                "symbol": symbol,
+                "name": name,
+                "last_price": close,
+                "prev_close": prev_close or close,
+                "change_pct": pct_val,
+                "change_amount": (close - prev_close) if prev_close else 0.0,
+                "amount": float(last_row.get("amount") or 0.0),
+                "volume": float(last_row.get("volume") or 0.0),
+                "date": str(last_row.get("date") or ""),
+            })
+        except Exception:
+            continue
+    return quotes

@@ -1366,10 +1366,15 @@ class KlineRepository:
             return pl.DataFrame()
         return self._live_agg_cache
 
+    _instruments_mtime_ns: int | None = None
+
     def get_instruments(self) -> pl.DataFrame:
-        """返回缓存的 instruments DataFrame。如无缓存则懒加载。"""
-        if self._instruments_cache is None:
+        """返回缓存的 instruments DataFrame。并在文件更新后自动刷新缓存。"""
+        path = self.store.data_dir / "instruments" / "instruments.parquet"
+        mtime_ns = path.stat().st_mtime_ns if path.exists() else None
+        if self._instruments_cache is None or mtime_ns != self._instruments_mtime_ns:
             self._refresh_instruments()
+            self._instruments_mtime_ns = mtime_ns
         if self._instruments_cache is None:
             return pl.DataFrame()
         return self._instruments_cache
@@ -1408,7 +1413,7 @@ class KlineRepository:
         """
         if asset_type == "stock":
             df = self.get_instruments()
-            if market in ("hk", "us") and not df.is_empty() and "market" in df.columns:
+            if not df.is_empty() and "market" in df.columns:
                 return df.filter(pl.col("market") == market)
             return df
         if asset_type == "index":
@@ -1612,6 +1617,11 @@ class KlineRepository:
         columns: list[str] | None = None,
         market: str = "cn",
     ) -> pl.DataFrame:
+        if market == "cn":
+            if symbol.endswith(".HK") or symbol.startswith("hk"):
+                market = "hk"
+            elif symbol.endswith(".US") or symbol.startswith("us"):
+                market = "us"
         if market in ("hk", "us"):
             return self.get_daily_market(market, symbol, start, end, columns)
         if asset_type == "stock":

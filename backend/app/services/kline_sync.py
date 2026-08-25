@@ -114,22 +114,35 @@ def sync_daily_batch(symbols: list[str],
 
     for i, chunk in enumerate(chunks):
         sleep_between_batches(i, rpm)
-        try:
-            if start_time and end_time:
-                raw = tf.klines.batch(
-                    chunk, period="1d", adjust=adjust,
-                    start_time=_datetime_to_ms(start_time),
-                    end_time=_datetime_to_ms(end_time),
-                    count=10000,
-                    as_dataframe=True, show_progress=False,
-                )
-            else:
-                raw = tf.klines.batch(chunk, period="1d", count=count or 250, adjust=adjust,
-                                      as_dataframe=True, show_progress=False)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("batch fetch failed for %d symbols (chunk %d/%d): %s",
-                           len(chunk), i + 1, len(chunks), e)
-            failed_syms.extend(chunk)
+        raw = None
+        for attempt in range(3):
+            try:
+                if start_time and end_time:
+                    raw = tf.klines.batch(
+                        chunk, period="1d", adjust=adjust,
+                        start_time=_datetime_to_ms(start_time),
+                        end_time=_datetime_to_ms(end_time),
+                        count=10000,
+                        as_dataframe=True, show_progress=False,
+                    )
+                else:
+                    raw = tf.klines.batch(chunk, period="1d", count=count or 250, adjust=adjust,
+                                          as_dataframe=True, show_progress=False)
+                break
+            except Exception as e:  # noqa: BLE001
+                err_str = str(e)
+                if "超限" in err_str or "429" in err_str or "rate" in err_str.lower():
+                    import time as _t
+                    _t.sleep(3.5 * (attempt + 1))
+                    continue
+                if attempt == 2:
+                    logger.warning("batch fetch failed for %d symbols (chunk %d/%d): %s",
+                                   len(chunk), i + 1, len(chunks), e)
+                    failed_syms.extend(chunk)
+                import time as _t
+                _t.sleep(1.0)
+
+        if raw is None:
             continue
 
         # 兼容两种形态:dict[sym → df] 和扁平 df

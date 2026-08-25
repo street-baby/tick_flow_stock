@@ -1075,10 +1075,10 @@ class StrategyEngine:
         )
 
         source_panel = context.history
-        market = context.market
+        market = context.market if hasattr(context.market, "symbols") else None
         if market is None:
-            if source_panel is None:
-                raise ValueError(f"matrix strategy {strategy_id} requires history data")
+            if source_panel is None or source_panel.is_empty():
+                source_panel = context.current
             if source_panel is None or source_panel.is_empty():
                 return StrategyResult(as_of=as_of, strategy_id=strategy_id)
             market = build_market_data_matrix(

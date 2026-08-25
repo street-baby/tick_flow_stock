@@ -138,20 +138,39 @@ class ScreenerService:
         # 最新日：repo.get_enriched_latest_market 已含历史窗口即时计算
         cache, cache_date = self.repo.get_enriched_latest_market(self.market)
         if cache is not None and not cache.is_empty() and cache_date == target_date:
-            return cache
-        # 历史日期：读分区 + 即时计算（含 warmup）
-        enriched_dir = self.repo.store.data_dir / self._enriched_dirname
-        target_parquet = enriched_dir / f"date={target_date.isoformat()}" / "part.parquet"
-        if not target_parquet.exists():
-            return pl.DataFrame()
-        try:
-            df = pl.read_parquet(target_parquet)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("load_enriched_for_date(%s) failed: %s", self.market, e)
-            return pl.DataFrame()
-        if df.is_empty():
-            return df
-        return self._compute_enriched_full(df, target_date)
+            df_res = cache
+        else:
+            # 历史日期：读分区 + 即时计算（含 warmup）
+            enriched_dir = self.repo.store.data_dir / self._enriched_dirname
+            target_parquet = enriched_dir / f"date={target_date.isoformat()}" / "part.parquet"
+            if not target_parquet.exists():
+                return pl.DataFrame()
+            try:
+                df = pl.read_parquet(target_parquet)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("load_enriched_for_date(%s) failed: %s", self.market, e)
+                return pl.DataFrame()
+            if df.is_empty():
+                return df
+            df_res = self._compute_enriched_full(df, target_date)
+
+        if not df_res.is_empty():
+            df_i = None
+            if hasattr(self.repo, "get_instruments_asset"):
+                df_i = self.repo.get_instruments_asset("stock", self.market)
+            elif hasattr(self.repo, "get_instruments"):
+                df_i = self.repo.get_instruments()
+            if df_i is not None and not df_i.is_empty() and "symbol" in df_i.columns:
+                inst_cols = [c for c in ["symbol", "name", "total_shares", "float_shares"] if c in df_i.columns]
+                if "name" not in df_res.columns:
+                    df_res = df_res.join(df_i.select(inst_cols), on="symbol", how="left")
+                else:
+                    df_res = df_res.join(df_i.select(inst_cols), on="symbol", how="left", suffix="_inst")
+                    if "name_inst" in df_res.columns:
+                        df_res = df_res.with_columns(
+                            pl.coalesce(["name", "name_inst", "symbol"]).alias("name")
+                        ).drop("name_inst")
+        return df_res
 
     def load_prior_consecutive(self, as_of: date, consec_col: str) -> pl.DataFrame:
         """窄读: 仅取前一交易日的 [symbol, consec_col] 两列 (谓词下推到单日 parquet)。
@@ -433,12 +452,13 @@ class ScreenerService:
         params_map: dict[str, dict] | None = None,
         overrides_map: dict[str, dict] | None = None,
         current: pl.DataFrame | None = None,
-        market=None,
+        market: str | None = None,
         cache_key: str | None = None,
     ):
         """按调用方要求装配标准策略数据上下文，不解释策略公式。"""
         from app.strategy.engine import StrategyDataContext
 
+        market = market or self.market
         if current is None:
             current = self._load_enriched_for_date(as_of)
         history_bars = engine.required_history_bars(

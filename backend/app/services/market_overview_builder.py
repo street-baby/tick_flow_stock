@@ -671,14 +671,17 @@ def build_market_overview_market(
     """
     from app.markets import get_market
     from app.services.screener import ScreenerService
+    from app.services.index_sync_market import get_market_index_quotes
 
     meta = get_market(market)
     svc = ScreenerService(repo, market=market)
     as_of = as_of or svc.latest_date()
 
+    idx_quotes = get_market_index_quotes(market, repo.store.data_dir) if repo else []
+
     empty = {
-        "as_of": None, "quote_status": {"enabled": False},
-        "indices": [], "breadth": {"total": 0, "up": 0, "down": 0, "flat": 0, "up_pct": 0, "down_pct": 0},
+        "as_of": str(as_of) if as_of else None, "quote_status": {"enabled": False},
+        "indices": idx_quotes, "breadth": {"total": 0, "up": 0, "down": 0, "flat": 0, "up_pct": 0, "down_pct": 0},
         "amount": {"total": 0, "avg": 0}, "boards": [],
         "limit": {"limit_up": 0, "broken": 0, "failed": 0, "limit_down": 0, "max_boards": 0, "tiers": []},
         "distribution": [],
@@ -691,12 +694,10 @@ def build_market_overview_market(
         "market": market,
     }
     if not as_of:
-        empty["as_of"] = None
         return empty
 
     df = svc._load_enriched_for_date(as_of)
     if df.is_empty():
-        empty["as_of"] = str(as_of)
         return empty
 
     cols = [
@@ -754,7 +755,7 @@ def build_market_overview_market(
     return _json_safe({
         "as_of": str(as_of),
         "quote_status": {"enabled": False, "is_trading_hours": False},
-        "indices": [],
+        "indices": idx_quotes,
         "breadth": {
             "total": total, "up": up, "down": down, "flat": flat,
             "up_pct": up_pct, "down_pct": down_pct, "avg_pct": avg_pct,
