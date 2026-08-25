@@ -201,10 +201,13 @@ class ScreenerService:
             if "symbol" not in cols or consec_col not in cols:
                 continue
             try:
-                return lf.select(
+                df_prior = lf.select(
                     "symbol",
                     pl.col(consec_col).alias("prev_consec"),
                 ).collect()
+                if not df_prior.is_empty():
+                    df_prior = df_prior.unique(subset=["symbol"], keep="last")
+                return df_prior
             except Exception as e:  # noqa: BLE001
                 logger.warning("load_prior_consecutive read failed for %s: %s", candidate, e)
                 return pl.DataFrame()
@@ -238,12 +241,16 @@ class ScreenerService:
             )
             available = [c for c in read_cols if c in lf.schema]
             df_hist = lf.select(available).collect()
+            if not df_hist.is_empty():
+                df_hist = df_hist.unique(subset=["symbol", "date"], keep="last")
         except Exception as e:  # noqa: BLE001
             logger.warning("warmup history load failed: %s", e)
             df_hist = df_target
 
         if df_hist.is_empty():
             df_hist = df_target
+        else:
+            df_hist = df_hist.unique(subset=["symbol", "date"], keep="last")
 
         # 计算指标
         df_full = compute_indicators(df_hist)

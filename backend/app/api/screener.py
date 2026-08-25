@@ -714,7 +714,7 @@ def limit_ladder(
         & (pl.col("name") != pl.col("symbol"))
         & pl.col("symbol").str.contains(r"^(?:(?:00[0123]|30[01]|60[0135]|68[89]|920)\d{3}|43\d{4}|83\d{4}|87\d{4})(?:\.(?:SZ|SH|BJ))?$")
     )
-    df = df.filter(valid_stock_mask)
+    df = df.filter(valid_stock_mask).unique(subset=["symbol"], keep="last")
     if df.is_empty():
         return {"as_of": str(as_of), "tiers": [], "counts": {"up": 0, "down": 0}}
 
@@ -724,13 +724,15 @@ def limit_ladder(
 
     # 双方向 sealed 修正: 减去各自的假涨停(假涨停已归炸板, 不计入涨停数)
     depth_svc_global = getattr(request.app.state, "depth_service", None)
+    up_map = {}
+    down_map = {}
     fake_up = 0
     fake_down = 0
     sealed_up_ready = False
     sealed_down_ready = False
     if depth_svc_global:
-        up_map = depth_svc_global.get_sealed_map(as_of, is_down=False)
-        down_map = depth_svc_global.get_sealed_map(as_of, is_down=True)
+        up_map = depth_svc_global.get_sealed_map(as_of, is_down=False) or {}
+        down_map = depth_svc_global.get_sealed_map(as_of, is_down=True) or {}
         sealed_up_ready = bool(up_map) and depth_svc_global.is_sealed_ready(as_of)
         sealed_down_ready = bool(down_map) and depth_svc_global.is_sealed_ready(as_of)
         if up_map:
@@ -757,6 +759,7 @@ def limit_ladder(
     prev_consec: pl.DataFrame = svc.load_prior_consecutive(as_of, consec_col)
 
     if not prev_consec.is_empty():
+        prev_consec = prev_consec.unique(subset=["symbol"], keep="last")
         df = df.join(prev_consec, on="symbol", how="left")
     else:
         df = df.with_columns(pl.lit(0).cast(pl.UInt32).alias("prev_consec"))
@@ -805,6 +808,7 @@ def limit_ladder(
             }) if sym_sealed else pl.DataFrame()
 
             if not sealed_rows.is_empty():
+                sealed_rows = sealed_rows.unique(subset=["symbol"], keep="last")
                 df = df.join(sealed_rows, on="symbol", how="left")
                 # 假涨停(main 状态但 sealed=False)→ 降级为 broken
                 df = df.with_columns(
@@ -866,7 +870,7 @@ def limit_ladder(
                     f"SELECT symbol, {quote_ident(field_name)} FROM {view_name}"
                 ).arrow())
                 if not ext_df.is_empty() and "symbol" in ext_df.columns:
-                    ext_df = ext_df.rename({field_name: ext_col_name})
+                    ext_df = ext_df.rename({field_name: ext_col_name}).unique(subset=["symbol"], keep="last")
                     df = df.join(ext_df.select(["symbol", ext_col_name]), on="symbol", how="left")
                     ext_col_names.append(ext_col_name)
             except Exception:
@@ -877,11 +881,14 @@ def limit_ladder(
                         glob = _parquet_glob(cfg, data_dir)
                         ext_df = pl.read_parquet(glob)
                         if not ext_df.is_empty() and "symbol" in ext_df.columns and field_name in ext_df.columns:
-                            ext_df = ext_df.select(["symbol", field_name]).rename({field_name: ext_col_name})
+                            ext_df = ext_df.select(["symbol", field_name]).rename({field_name: ext_col_name}).unique(subset=["symbol"], keep="last")
                             df = df.join(ext_df, on="symbol", how="left")
                             ext_col_names.append(ext_col_name)
                     except Exception:
                         pass
+
+    # 确保主表每只股票仅一条记录
+    df = df.unique(subset=["symbol"], keep="last")
 
     # 选择输出列
     cols = ["symbol", "name", "close", "change_pct", "boards", "status", consec_col, "sealed_status", "sealed_vol", "is_one_word"] + ext_col_names
