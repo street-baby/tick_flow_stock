@@ -103,6 +103,16 @@ def test_trading_system_ai_copilot(tmp_path: Path):
     assert "rebalance_alerts" in copilot
 
 
+def test_trading_system_tail_market(tmp_path: Path):
+    srv = TradingSystemService(tmp_path)
+    tail = srv.get_tail_market_plan()
+    assert "audit" in tail
+    assert tail["audit"]["primary_win_rate"] >= 80.0
+    assert tail["audit"]["profit_factor"] >= 3.0
+    assert tail["audit"]["max_drawdown_pct"] <= 2.0
+    assert "tail_picks" in tail
+
+
 def test_trade_plan_api_routes(tmp_path: Path):
     app = FastAPI()
     app.state.repo = SimpleNamespace(store=SimpleNamespace(data_dir=tmp_path))
@@ -154,3 +164,10 @@ def test_trade_plan_api_routes(tmp_path: Path):
     c_data = res_copilot.json()
     assert "ai_directive" in c_data
     assert "ai_high_alpha_picks" in c_data
+
+    # Tail Market API
+    res_tail = client.get("/api/trade-plan/tail-market")
+    assert res_tail.status_code == 200
+    t_data = res_tail.json()
+    assert "audit" in t_data
+    assert "tail_picks" in t_data

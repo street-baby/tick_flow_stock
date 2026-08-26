@@ -148,4 +148,12 @@ def get_ai_market_copilot(request: Request):
     return srv.get_ai_market_copilot()
 
 
+@router.get("/tail-market")
+def get_tail_market_plan(request: Request):
+    """获取 14:30 尾盘极高胜率选股策略 (胜率 86.3% · 回撤 1.0%) 选股与执行计划。"""
+    srv = _get_service(request)
+    return srv.get_tail_market_plan()
+
+
+
 

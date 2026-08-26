@@ -2576,6 +2576,7 @@ export const api = {
       }${stopLossPct ? `&stop_loss_pct=${stopLossPct}` : ''}`
     ),
   tradePlanAiCopilot: () => request<AiCopilotResponse>('/api/trade-plan/ai-copilot'),
+  tradePlanTailMarket: () => request<TailMarketResponse>('/api/trade-plan/tail-market'),
 }
 
 export interface AuctionAIAnalysisItem {
@@ -3093,5 +3094,47 @@ export interface AiCopilotResponse {
   ai_high_alpha_picks: AiHighAlphaPickItem[]
   rebalance_alerts: RebalanceAlertItem[]
 }
+
+export interface TailMarketAudit {
+  strategy_name: string
+  backtest_period: string
+  primary_win_rate: number
+  secondary_win_rate: number
+  composite_win_rate: number
+  profit_factor: number
+  max_drawdown_pct: number
+  avg_return_pct: number
+  next_high_gt_2pct_prob: number
+  total_trades_count: number
+  core_logic: string
+}
+
+export interface TailMarketPickItem {
+  symbol: string
+  name: string
+  pattern_type: 'FB_ENGULFING' | 'FB_SHRINKAGE' | 'MA20_REBOUND'
+  strategy_title: string
+  win_rate: number
+  profit_factor: number
+  buy_price: number
+  stop_loss_price: number
+  stop_loss_pct: number
+  suggested_shares: number
+  order_amount: number
+  tp_target_1: number
+  tp_target_2: number
+  holding_days_max: number
+  logic_detail: string
+  execution_time: string
+  next_day_action: string
+}
+
+export interface TailMarketResponse {
+  date: string
+  audit: TailMarketAudit
+  market_gate: MarketGateInfo
+  tail_picks: TailMarketPickItem[]
+}
+
 
 
