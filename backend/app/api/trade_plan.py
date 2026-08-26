@@ -141,3 +141,11 @@ def lookup_stock_quote(
     )
 
 
+@router.get("/ai-copilot")
+def get_ai_market_copilot(request: Request):
+    """获取 AI 看盘决策大脑：大盘研判 + 板块共振 + 竞价抢筹 + 最高盈利期望标的 + 实时追进动态 + 动态调仓建议。"""
+    srv = _get_service(request)
+    return srv.get_ai_market_copilot()
+
+
+

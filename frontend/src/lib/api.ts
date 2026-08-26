@@ -2575,6 +2575,7 @@ export const api = {
         buyPrice ? `&buy_price=${buyPrice}` : ''
       }${stopLossPct ? `&stop_loss_pct=${stopLossPct}` : ''}`
     ),
+  tradePlanAiCopilot: () => request<AiCopilotResponse>('/api/trade-plan/ai-copilot'),
 }
 
 export interface AuctionAIAnalysisItem {
@@ -2947,6 +2948,7 @@ export interface TradePlanItem {
   trailing_stop_desc: string
   max_holding_days: number
   last_limit_date: string
+  is_custom?: boolean
 }
 
 export interface DailyTradePlanResponse {
@@ -3043,4 +3045,53 @@ export interface TradingSettings {
   trailing_stop_pullback: number
   peak_equity: number
 }
+
+export interface HotSectorItem {
+  name: string
+  heat_score: number
+  flow_net_amt: string
+  trend: string
+  leader: string
+}
+
+export interface AiHighAlphaPickItem extends TradePlanItem {
+  ai_rating: string
+  auction_gap_pct: number
+  auction_score: number
+  expected_win_rate: number
+  expected_rr_ratio: number
+  chase_status: 'TRIGGERED_BUY' | 'ADD_TRANCHE' | 'READY_TO_BUY' | 'WATCH' | 'AVOID_CHASE'
+  chase_badge: string
+  chase_desc: string
+  chase_color: 'emerald' | 'cyan' | 'blue' | 'amber' | 'danger'
+  flow_intensity: string
+  sector_tag: string
+  ai_analysis: string
+}
+
+export interface RebalanceAlertItem {
+  symbol: string
+  name: string
+  shares: number
+  buy_price: number
+  current_price: number
+  floating_pnl: number
+  floating_pnl_pct: number
+  current_r: number
+  flow_status: 'PROFIT_TAKING' | 'BREAKEVEN_HOLD' | 'STOP_LOSS' | 'OUTFLOW_REBALANCE' | 'HEALTHY'
+  alert_type: 'success' | 'blue' | 'danger' | 'warning' | 'neutral'
+  advice: string
+  action_btn: string
+}
+
+export interface AiCopilotResponse {
+  date: string
+  market_gate: MarketGateInfo
+  market_sentiment: string
+  ai_directive: string
+  hot_sectors: HotSectorItem[]
+  ai_high_alpha_picks: AiHighAlphaPickItem[]
+  rebalance_alerts: RebalanceAlertItem[]
+}
+
 

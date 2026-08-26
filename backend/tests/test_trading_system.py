@@ -91,6 +91,18 @@ def test_trading_system_positions_and_exit(tmp_path: Path):
     assert res2["closed_trade"]["realized_pnl"] == 300.0
 
 
+def test_trading_system_ai_copilot(tmp_path: Path):
+    srv = TradingSystemService(tmp_path)
+    copilot = srv.get_ai_market_copilot()
+    assert "market_gate" in copilot
+    assert "market_sentiment" in copilot
+    assert "ai_directive" in copilot
+    assert "hot_sectors" in copilot
+    assert len(copilot["hot_sectors"]) > 0
+    assert "ai_high_alpha_picks" in copilot
+    assert "rebalance_alerts" in copilot
+
+
 def test_trade_plan_api_routes(tmp_path: Path):
     app = FastAPI()
     app.state.repo = SimpleNamespace(store=SimpleNamespace(data_dir=tmp_path))
@@ -135,3 +147,10 @@ def test_trade_plan_api_routes(tmp_path: Path):
     res_del = client.delete("/api/trade-plan/custom/600519.SH")
     assert res_del.status_code == 200
     assert len(res_del.json()) == 0
+
+    # AI Copilot API
+    res_copilot = client.get("/api/trade-plan/ai-copilot")
+    assert res_copilot.status_code == 200
+    c_data = res_copilot.json()
+    assert "ai_directive" in c_data
+    assert "ai_high_alpha_picks" in c_data
