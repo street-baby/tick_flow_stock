@@ -102,3 +102,25 @@ def update_settings(request: Request, settings: dict[str, Any] = Body(...)):
     """更新系统交易与风控参数配置。"""
     srv = _get_service(request)
     return srv.save_settings(settings)
+
+
+@router.get("/custom")
+def get_custom_plans(request: Request):
+    """获取所有自定义买入计划。"""
+    srv = _get_service(request)
+    return srv.get_custom_plans()
+
+
+@router.post("/custom")
+def save_custom_plan(request: Request, plan: dict[str, Any] = Body(...)):
+    """新增或更新一条用户自定义开盘买入计划。"""
+    srv = _get_service(request)
+    return srv.save_custom_plan(plan)
+
+
+@router.delete("/custom/{symbol}")
+def delete_custom_plan(request: Request, symbol: str):
+    """删除一条自定义开盘买入计划。"""
+    srv = _get_service(request)
+    return srv.delete_custom_plan(symbol)
+

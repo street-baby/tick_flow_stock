@@ -2540,6 +2540,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(settings),
     }),
+  tradePlanCustomPlans: () => request<TradePlanItem[]>('/api/trade-plan/custom'),
+  tradePlanSaveCustomPlan: (plan: Partial<TradePlanItem>) =>
+    request<TradePlanItem[]>('/api/trade-plan/custom', {
+      method: 'POST',
+      body: JSON.stringify(plan),
+    }),
+  tradePlanDeleteCustomPlan: (symbol: string) =>
+    request<TradePlanItem[]>(`/api/trade-plan/custom/${encodeURIComponent(symbol)}`, {
+      method: 'DELETE',
+    }),
 }
 
 export interface AuctionAIAnalysisItem {

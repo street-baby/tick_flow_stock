@@ -1,7 +1,7 @@
 """测试短线趋势资金共振交易系统 (Trade Plan Service & API)."""
 from pathlib import Path
 from types import SimpleNamespace
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.services.trading_system import TradingSystemService
@@ -23,6 +23,32 @@ def test_trading_system_settings(tmp_path: Path):
     # 重新加载
     s2 = srv.get_settings()
     assert s2["account_equity"] == 60000.0
+
+
+def test_trading_system_custom_plans(tmp_path: Path):
+    srv = TradingSystemService(tmp_path)
+    # 1. 初始为空
+    assert len(srv.get_custom_plans()) == 0
+
+    # 2. 自定义添加一条买入计划
+    custom_item = {
+        "symbol": "000001.SZ",
+        "name": "平安银行",
+        "buy_price": 12.0,
+        "stop_loss_price": 11.4,
+        "strategies": ["突破买入"],
+        "reasons": ["大单异动"],
+    }
+    plans = srv.save_custom_plan(custom_item)
+    assert len(plans) == 1
+    assert plans[0]["symbol"] == "000001.SZ"
+    assert plans[0]["is_custom"] is True
+    assert plans[0]["suggested_shares"] > 0
+    assert plans[0]["tp_1r"] > 12.0
+
+    # 3. 删除自定义计划
+    remaining = srv.delete_custom_plan("000001.SZ")
+    assert len(remaining) == 0
 
 
 def test_trading_system_positions_and_exit(tmp_path: Path):
@@ -89,3 +115,23 @@ def test_trade_plan_api_routes(tmp_path: Path):
     res_post_set = client.post("/api/trade-plan/settings", json={"account_equity": 80000.0})
     assert res_post_set.status_code == 200
     assert res_post_set.json()["account_equity"] == 80000.0
+
+    # 自定义计划 API
+    res_custom = client.post("/api/trade-plan/custom", json={
+        "symbol": "600519.SH",
+        "name": "贵州茅台",
+        "buy_price": 1400.0,
+        "stop_loss_price": 1330.0,
+    })
+    assert res_custom.status_code == 200
+    assert len(res_custom.json()) == 1
+
+    # 获取自定义计划
+    res_list = client.get("/api/trade-plan/custom")
+    assert res_list.status_code == 200
+    assert len(res_list.json()) == 1
+
+    # 删除自定义计划
+    res_del = client.delete("/api/trade-plan/custom/600519.SH")
+    assert res_del.status_code == 200
+    assert len(res_del.json()) == 0

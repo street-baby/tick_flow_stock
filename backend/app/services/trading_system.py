@@ -36,6 +36,7 @@ class TradingSystemService:
         self.positions_file = self.user_data_dir / "trade_positions.json"
         self.history_file = self.user_data_dir / "trade_history.json"
         self.settings_file = self.user_data_dir / "trading_settings.json"
+        self.custom_plans_file = self.user_data_dir / "custom_trade_plans.json"
 
     # ================= 1. 默认设置管理 =================
     def get_settings(self) -> dict[str, Any]:
@@ -397,6 +398,14 @@ class TradingSystemService:
         # 截取最多推荐只数 (由市场环境决定)
         top_plans = plans[:max(3, market_gate["max_positions"] * 2)]
         
+        # 合并用户自定义加入的买入计划 (排在最前)
+        custom_plans = self.get_custom_plans()
+        if custom_plans:
+            # 排除已存在于 top_plans 的重复 symbol
+            existing_symbols = {p["symbol"] for p in top_plans}
+            clean_custom = [cp for cp in custom_plans if cp["symbol"] not in existing_symbols]
+            top_plans = custom_plans + [p for p in top_plans if p["symbol"] not in {cp["symbol"] for cp in custom_plans}]
+        
         return {
             "date": str(latest_dt),
             "market_gate": market_gate,
@@ -409,7 +418,102 @@ class TradingSystemService:
                 "max_single_position_pct": settings["max_single_position_pct"],
             },
             "plans": top_plans,
+            "custom_plans": custom_plans,
         }
+
+    # ================= 3.1 自定义执行计划管理 =================
+    def get_custom_plans(self) -> list[dict[str, Any]]:
+        """获取用户手动加入的所有自定义开盘计划。"""
+        if not self.custom_plans_file.exists():
+            return []
+        try:
+            with open(self.custom_plans_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Failed to load custom plans: %s", e)
+            return []
+
+    def save_custom_plan(self, plan_data: dict[str, Any]) -> list[dict[str, Any]]:
+        """保存/更新一条用户自定义开盘买入计划，并自动计算风控仓位与分级止盈价。"""
+        settings = self.get_settings()
+        account_equity = settings["account_equity"]
+        single_risk_amount = account_equity * settings["base_risk_ratio"]
+        
+        sym = plan_data["symbol"]
+        buy_price = float(plan_data.get("buy_price") or plan_data.get("close") or 10.0)
+        
+        # 止损价
+        if "stop_loss_price" in plan_data and float(plan_data["stop_loss_price"]) > 0:
+            stop_loss_price = float(plan_data["stop_loss_price"])
+        else:
+            stop_loss_price = round(buy_price * (1 - settings["max_stop_loss_pct"]), 2)
+            
+        per_share_risk = max(0.01, buy_price - stop_loss_price)
+        stop_loss_pct = per_share_risk / buy_price
+        
+        # 理论股数与最大单股仓位限制 (15%)
+        theoretical_shares = single_risk_amount / per_share_risk
+        max_stock_amount = account_equity * settings["max_single_position_pct"]
+        max_allowed_shares = int(max_stock_amount / buy_price) if buy_price > 0 else 0
+        
+        final_shares = int(min(theoretical_shares, max_allowed_shares) // 100 * 100) or 100
+        order_amount = round(final_shares * buy_price, 2)
+        position_pct = round(order_amount / account_equity, 4)
+        
+        first_tranche_shares = int((final_shares * 0.5) // 100 * 100) or 100
+        second_tranche_shares = max(0, final_shares - first_tranche_shares)
+        
+        # 分级止盈价
+        tp_1r = round(buy_price + per_share_risk * 1.0, 2)
+        tp_15r = round(buy_price + per_share_risk * 1.5, 2)
+        tp_2r = round(buy_price + per_share_risk * 2.0, 2)
+        max_open_price = round(buy_price * (1 + settings["max_open_chg_pct"]), 2)
+
+        custom_item = {
+            "symbol": sym,
+            "name": plan_data.get("name", sym),
+            "close": buy_price,
+            "change_pct": float(plan_data.get("change_pct", 0.0)),
+            "composite_score": float(plan_data.get("composite_score", 95.0)),
+            "trend_score": float(plan_data.get("trend_score", 25.0)),
+            "strategies": plan_data.get("strategies", ["自定义买入计划"]),
+            "reasons": plan_data.get("reasons", ["用户自选加入计划", "符合短线资金风控纪律"]),
+            "buy_price": buy_price,
+            "stop_loss_price": stop_loss_price,
+            "stop_loss_pct": round(stop_loss_pct, 4),
+            "max_open_price": max_open_price,
+            "suggested_shares": final_shares,
+            "order_amount": order_amount,
+            "position_pct": position_pct,
+            "first_tranche_shares": first_tranche_shares,
+            "second_tranche_shares": second_tranche_shares,
+            "tp_1r": tp_1r,
+            "tp_15r": tp_15r,
+            "tp_2r": tp_2r,
+            "trailing_stop_desc": "剩余仓位跌破MA5或自最高点回撤2.5%止盈",
+            "max_holding_days": settings["max_holding_days"],
+            "last_limit_date": plan_data.get("last_limit_date", "—"),
+            "is_custom": True,
+            "created_at": datetime.now().isoformat(),
+        }
+
+        plans = self.get_custom_plans()
+        # 覆盖同 symbol
+        updated_plans = [p for p in plans if p.get("symbol") != sym]
+        updated_plans.insert(0, custom_item)
+
+        with open(self.custom_plans_file, "w", encoding="utf-8") as f:
+            json.dump(updated_plans, f, ensure_ascii=False, indent=2)
+
+        return updated_plans
+
+    def delete_custom_plan(self, symbol: str) -> list[dict[str, Any]]:
+        """删除一条自定义开盘计划。"""
+        plans = self.get_custom_plans()
+        updated_plans = [p for p in plans if p.get("symbol") != symbol]
+        with open(self.custom_plans_file, "w", encoding="utf-8") as f:
+            json.dump(updated_plans, f, ensure_ascii=False, indent=2)
+        return updated_plans
 
     # ================= 4. 持仓管理与分级止盈止损监控 =================
     def get_active_positions(self) -> list[dict[str, Any]]:

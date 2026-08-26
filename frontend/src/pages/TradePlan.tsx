@@ -16,6 +16,9 @@ import {
   RefreshCw,
   Target,
   X,
+  Trash2,
+  Search,
+  Star,
 } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { Skeleton } from '@/components/data/Skeleton'
@@ -39,6 +42,18 @@ export function TradePlan() {
   
   // Settings modal
   const [settingsOpen, setSettingsOpen] = useState(false)
+  
+  // Custom plan modal
+  const [customPlanOpen, setCustomPlanOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{ symbol: string; name: string; type?: string }>>([])
+  const [customSymbol, setCustomSymbol] = useState('')
+  const [customName, setCustomName] = useState('')
+  const [customBuyPrice, setCustomBuyPrice] = useState<number>(10.0)
+  const [customStopLossPrice, setCustomStopLossPrice] = useState<number>(9.5)
+  const [customStrategy, setCustomStrategy] = useState('自选短线突破')
+  const [customReason, setCustomReason] = useState('形态良好，资金介入，符合短线风控')
+
   // Manual buy / execute modal
   const [buyModalItem, setBuyModalItem] = useState<TradePlanItem | null>(null)
   const [buyPriceInput, setBuyPriceInput] = useState<number>(0)
@@ -85,6 +100,27 @@ export function TradePlan() {
     return () => clearInterval(timer)
   }, [])
 
+  // Stock search debounce
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.instrumentSearch(searchQuery.trim(), 8)
+        if (res && Array.isArray((res as any).results)) {
+          setSearchResults((res as any).results)
+        } else if (Array.isArray(res)) {
+          setSearchResults(res as any)
+        }
+      } catch {
+        setSearchResults([])
+      }
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
   // Queries
   const { data: dailyData, isLoading: dailyLoading, refetch: refetchDaily } = useQuery({
     queryKey: ['trade-plan', 'daily'],
@@ -112,10 +148,28 @@ export function TradePlan() {
   const addPositionMut = useMutation({
     mutationFn: (data: any) => api.tradePlanAddPosition(data),
     onSuccess: () => {
-      toast('成功录入/执行持仓订单！', 'success')
+      toast('成功执行买入并写入持仓！', 'success')
       queryClient.invalidateQueries({ queryKey: ['trade-plan', 'positions'] })
       queryClient.invalidateQueries({ queryKey: ['trade-plan', 'daily'] })
       setBuyModalItem(null)
+    },
+  })
+
+  const saveCustomPlanMut = useMutation({
+    mutationFn: (data: any) => api.tradePlanSaveCustomPlan(data),
+    onSuccess: () => {
+      toast('成功将标的加入今日开盘计划！', 'success')
+      queryClient.invalidateQueries({ queryKey: ['trade-plan', 'daily'] })
+      setCustomPlanOpen(false)
+      setSearchQuery('')
+    },
+  })
+
+  const deleteCustomPlanMut = useMutation({
+    mutationFn: (symbol: string) => api.tradePlanDeleteCustomPlan(symbol),
+    onSuccess: () => {
+      toast('已移除该自定义计划', 'success')
+      queryClient.invalidateQueries({ queryKey: ['trade-plan', 'daily'] })
     },
   })
 
@@ -166,6 +220,40 @@ export function TradePlan() {
   const alertPositionsCount = useMemo(() => {
     return positions.filter(p => p.action_alerts && p.action_alerts.length > 0).length
   }, [positions])
+
+  // Custom plan sizing preview
+  const customSizing = useMemo(() => {
+    const equity = riskInfo?.account_equity || 50000
+    const riskRatio = riskInfo?.risk_ratio || 0.005
+    const riskAmount = equity * riskRatio
+    const buyP = customBuyPrice > 0 ? customBuyPrice : 10.0
+    const slP = customStopLossPrice > 0 ? customStopLossPrice : buyP * 0.95
+    const perShareRisk = Math.max(0.01, buyP - slP)
+    const slPct = perShareRisk / buyP
+    const theoShares = riskAmount / perShareRisk
+    const maxStockAmt = equity * (riskInfo?.max_single_position_pct || 0.15)
+    const maxAllowedShares = Math.floor(maxStockAmt / buyP)
+    const finalShares = Math.max(100, Math.floor(Math.min(theoShares, maxAllowedShares) / 100) * 100)
+    const orderAmt = finalShares * buyP
+    const posPct = orderAmt / equity
+    const firstTranche = Math.max(100, Math.floor((finalShares * 0.5) / 100) * 100)
+    const secondTranche = Math.max(0, finalShares - firstTranche)
+    const tp1 = buyP + perShareRisk * 1.0
+    const tp15 = buyP + perShareRisk * 1.5
+    const tp2 = buyP + perShareRisk * 2.0
+    return {
+      finalShares,
+      orderAmt,
+      posPct,
+      slPct,
+      firstTranche,
+      secondTranche,
+      tp1,
+      tp15,
+      tp2,
+      riskAmount,
+    }
+  }, [customBuyPrice, customStopLossPrice, riskInfo])
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 p-4 md:p-6">
@@ -335,50 +423,69 @@ export function TradePlan() {
       </div>
 
       {/* 选项卡导航 */}
-      <div className="flex items-center gap-2 border-b border-border pb-1">
-        <button
-          onClick={() => setActiveTab('plans')}
-          className={cn(
-            'flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-bold transition-colors cursor-pointer',
-            activeTab === 'plans'
-              ? 'border-b-2 border-violet-500 bg-surface text-violet-400 shadow-sm'
-              : 'text-muted hover:text-foreground hover:bg-elevated/40'
-          )}
-        >
-          <Target className="h-4 w-4" />
-          <span>今日开盘执行计划 ({plans.length})</span>
-        </button>
+      <div className="flex items-center justify-between border-b border-border pb-1">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveTab('plans')}
+            className={cn(
+              'flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-bold transition-colors cursor-pointer',
+              activeTab === 'plans'
+                ? 'border-b-2 border-violet-500 bg-surface text-violet-400 shadow-sm'
+                : 'text-muted hover:text-foreground hover:bg-elevated/40'
+            )}
+          >
+            <Target className="h-4 w-4" />
+            <span>今日开盘执行计划 ({plans.length})</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('positions')}
-          className={cn(
-            'flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-bold transition-colors cursor-pointer',
-            activeTab === 'positions'
-              ? 'border-b-2 border-violet-500 bg-surface text-violet-400 shadow-sm'
-              : 'text-muted hover:text-foreground hover:bg-elevated/40'
-          )}
-        >
-          <Layers className="h-4 w-4" />
-          <span>实时持仓与分级止盈 ({positions.length})</span>
-          {alertPositionsCount > 0 && (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-white">
-              {alertPositionsCount}
-            </span>
-          )}
-        </button>
+          <button
+            onClick={() => setActiveTab('positions')}
+            className={cn(
+              'flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-bold transition-colors cursor-pointer',
+              activeTab === 'positions'
+                ? 'border-b-2 border-violet-500 bg-surface text-violet-400 shadow-sm'
+                : 'text-muted hover:text-foreground hover:bg-elevated/40'
+            )}
+          >
+            <Layers className="h-4 w-4" />
+            <span>实时持仓与分级止盈 ({positions.length})</span>
+            {alertPositionsCount > 0 && (
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-danger text-[9px] font-bold text-white">
+                {alertPositionsCount}
+              </span>
+            )}
+          </button>
 
-        <button
-          onClick={() => setActiveTab('history')}
-          className={cn(
-            'flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-bold transition-colors cursor-pointer',
-            activeTab === 'history'
-              ? 'border-b-2 border-violet-500 bg-surface text-violet-400 shadow-sm'
-              : 'text-muted hover:text-foreground hover:bg-elevated/40'
-          )}
-        >
-          <BarChart2 className="h-4 w-4" />
-          <span>交易复盘与纪律统计</span>
-        </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={cn(
+              'flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-xs font-bold transition-colors cursor-pointer',
+              activeTab === 'history'
+                ? 'border-b-2 border-violet-500 bg-surface text-violet-400 shadow-sm'
+                : 'text-muted hover:text-foreground hover:bg-elevated/40'
+            )}
+          >
+            <BarChart2 className="h-4 w-4" />
+            <span>交易复盘与纪律统计</span>
+          </button>
+        </div>
+
+        {/* 顶部快捷加入计划按钮 */}
+        {activeTab === 'plans' && (
+          <button
+            onClick={() => {
+              setCustomSymbol('')
+              setCustomName('')
+              setCustomBuyPrice(10.0)
+              setCustomStopLossPrice(9.5)
+              setCustomPlanOpen(true)
+            }}
+            className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:from-violet-500 hover:to-indigo-500 transition-all cursor-pointer"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>自定义加入买入计划</span>
+          </button>
+        )}
       </div>
 
       {/* ===== TAB 1: 今日开盘执行计划表 ===== */}
@@ -388,7 +495,7 @@ export function TradePlan() {
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-violet-400" />
               <span>
-                基准选股日: <span className="font-mono font-medium text-foreground">{dailyData?.date || '最新'}</span> · 严格满足 5 大买入条件与 3 大策略共振
+                基准选股日: <span className="font-mono font-medium text-foreground">{dailyData?.date || '最新'}</span> · 系统策略 + 自定义计划统一风控
               </span>
             </div>
             <div className="text-[11px] text-amber-400">
@@ -403,17 +510,27 @@ export function TradePlan() {
             </div>
           ) : plans.length === 0 ? (
             <div className="rounded-xl border border-border bg-surface p-12 text-center">
-              <EmptyState title="今日暂无符合严格买入条件的标的" hint="市场环境或个股未达 72 分及 5 项核心标准，保持空仓也是一种交易纪律。" />
+              <EmptyState title="暂无执行计划" hint="可点击上方【+ 自定义加入买入计划】将您关注的标的纳入开盘执行计划。" />
+              <button
+                onClick={() => setCustomPlanOpen(true)}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-violet-500 cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>立即加入我的买入计划</span>
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {plans.map((item, idx) => (
+              {plans.map((item: any, idx) => (
                 <motion.div
                   key={item.symbol}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05 }}
-                  className="flex flex-col justify-between rounded-xl border border-border bg-surface p-4.5 shadow-sm transition-all hover:border-violet-500/40 hover:shadow-md"
+                  className={cn(
+                    'flex flex-col justify-between rounded-xl border bg-surface p-4.5 shadow-sm transition-all hover:shadow-md',
+                    item.is_custom ? 'border-amber-500/40 bg-gradient-to-br from-surface via-surface to-amber-500/[0.03]' : 'border-border hover:border-violet-500/40'
+                  )}
                 >
                   {/* 头部信息 */}
                   <div>
@@ -430,14 +547,20 @@ export function TradePlan() {
                           <span className={cn('font-mono text-xs font-bold', priceColorClass(item.change_pct))}>
                             {fmtPct(item.change_pct)}
                           </span>
+                          {item.is_custom && (
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold text-amber-400">
+                              <Star className="h-2.5 w-2.5 fill-amber-400" />
+                              自定义
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1.5 flex flex-wrap gap-1">
-                          {item.strategies.map((st) => (
+                          {item.strategies.map((st: string) => (
                             <span key={st} className="rounded bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 text-[10px] font-medium text-violet-300">
                               {st}
                             </span>
                           ))}
-                          {item.last_limit_date !== '—' && (
+                          {item.last_limit_date && item.last_limit_date !== '—' && (
                             <span className="rounded bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
                               近月涨停: {item.last_limit_date}
                             </span>
@@ -445,11 +568,22 @@ export function TradePlan() {
                         </div>
                       </div>
 
-                      {/* 综合评分徽章 */}
+                      {/* 综合评分徽章与删除自定义按钮 */}
                       <div className="flex flex-col items-end">
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-xl font-extrabold font-mono text-violet-400">{item.composite_score}</span>
-                          <span className="text-[10px] text-muted">分</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-xl font-extrabold font-mono text-violet-400">{item.composite_score}</span>
+                            <span className="text-[10px] text-muted">分</span>
+                          </div>
+                          {item.is_custom && (
+                            <button
+                              onClick={() => deleteCustomPlanMut.mutate(item.symbol)}
+                              className="p-1 text-muted hover:text-danger hover:bg-elevated rounded transition-colors cursor-pointer"
+                              title="移除此自定义计划"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                         </div>
                         <span className="text-[10px] text-muted">综合强度评分</span>
                       </div>
@@ -457,7 +591,7 @@ export function TradePlan() {
 
                     {/* 买入理由列表 */}
                     <div className="mt-3 rounded-lg bg-base/50 p-2.5 text-[11px] text-secondary space-y-1">
-                      {item.reasons.map((r, i) => (
+                      {item.reasons.map((r: string, i: number) => (
                         <div key={i} className="flex items-center gap-1.5">
                           <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />
                           <span>{r}</span>
@@ -557,42 +691,7 @@ export function TradePlan() {
             <Skeleton className="h-48 rounded-xl" />
           ) : positions.length === 0 ? (
             <div className="rounded-xl border border-border bg-surface p-12 text-center">
-              <EmptyState title="暂无持仓标的" hint="可在「今日开盘执行计划」中点击【确认买入】，或点击下方按钮手动录入实盘持仓。" />
-              <button
-                onClick={() => {
-                  setBuyModalItem({
-                    symbol: '603366.SH',
-                    name: '日出东方',
-                    close: 7.33,
-                    change_pct: 0,
-                    composite_score: 80,
-                    trend_score: 20,
-                    strategies: ['短线共振'],
-                    reasons: [],
-                    buy_price: 7.33,
-                    stop_loss_price: 7.05,
-                    stop_loss_pct: 0.04,
-                    max_open_price: 7.55,
-                    suggested_shares: 500,
-                    order_amount: 3665,
-                    position_pct: 0.07,
-                    first_tranche_shares: 200,
-                    second_tranche_shares: 300,
-                    tp_1r: 7.61,
-                    tp_15r: 7.75,
-                    tp_2r: 7.89,
-                    trailing_stop_desc: '',
-                    max_holding_days: 5,
-                    last_limit_date: '',
-                  })
-                  setBuyPriceInput(7.33)
-                  setBuySharesInput(500)
-                }}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-violet-500 cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>手动录入持仓</span>
-              </button>
+              <EmptyState title="暂无持仓标的" hint="可在「今日开盘执行计划」中点击【确认买入】，或点击上方【自定义加入买入计划】录入持仓。" />
             </div>
           ) : (
             <div className="space-y-3">
@@ -808,7 +907,209 @@ export function TradePlan() {
         </div>
       )}
 
-      {/* ===== 弹窗 1: 买入确认 / 录入持仓 ===== */}
+      {/* ===== 弹窗 1: 自定义加入买入计划 ===== */}
+      {customPlanOpen && (
+        <Modal onClose={() => setCustomPlanOpen(false)}>
+          <div className="p-5 space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400">
+                  <Target className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">自定义加入开盘买入计划</h3>
+                  <p className="text-[11px] text-muted">系统将自动按 0.5% 单笔风控与 15% 仓位上限为您精准算仓</p>
+                </div>
+              </div>
+              <button onClick={() => setCustomPlanOpen(false)} className="text-muted hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* 股票搜索/输入 */}
+            <div className="relative space-y-1">
+              <label className="text-muted">搜索或输入股票代码/名称</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+                <input
+                  type="text"
+                  placeholder="例如: 603366 / 日出东方 / 000628"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-base pl-9 pr-3 py-2 text-foreground focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+
+              {/* 搜索建议列表 */}
+              {searchResults.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
+                  {searchResults.map((s) => (
+                    <button
+                      key={s.symbol}
+                      onClick={() => {
+                        setCustomSymbol(s.symbol)
+                        setCustomName(s.name)
+                        setSearchQuery(`${s.name} (${s.symbol})`)
+                        setSearchResults([])
+                      }}
+                      className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-elevated cursor-pointer"
+                    >
+                      <span className="font-medium text-foreground">{s.name}</span>
+                      <span className="font-mono text-muted text-[11px]">{s.symbol}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {customSymbol && (
+              <div className="flex items-center gap-2 rounded-lg bg-violet-500/10 border border-violet-500/20 px-3 py-2 text-violet-300">
+                <CheckCircle2 className="h-4 w-4 text-violet-400" />
+                <span>已选定标的: <strong>{customName}</strong> ({customSymbol})</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-muted">计划买入价格 (元)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={customBuyPrice}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value) || 0
+                    setCustomBuyPrice(v)
+                    setCustomStopLossPrice(round2(v * 0.95))
+                  }}
+                  className="w-full rounded-lg border border-border bg-base px-3 py-2 font-mono text-foreground focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-muted">严格止损价 (元)</label>
+                  <span className="font-mono text-danger text-[10px]">
+                    -{(customSizing.slPct * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={customStopLossPrice}
+                  onChange={(e) => setCustomStopLossPrice(parseFloat(e.target.value) || 0)}
+                  className="w-full rounded-lg border border-border bg-base px-3 py-2 font-mono text-foreground focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* 快速止损比例调节按钮 */}
+            <div className="flex items-center gap-2 text-[10px]">
+              <span className="text-muted">快捷止损幅度:</span>
+              <button
+                type="button"
+                onClick={() => setCustomStopLossPrice(round2(customBuyPrice * 0.97))}
+                className="rounded bg-elevated px-2 py-0.5 text-foreground hover:bg-elevated/80"
+              >
+                -3.0%
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomStopLossPrice(round2(customBuyPrice * 0.96))}
+                className="rounded bg-elevated px-2 py-0.5 text-foreground hover:bg-elevated/80"
+              >
+                -4.0%
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomStopLossPrice(round2(customBuyPrice * 0.95))}
+                className="rounded bg-elevated px-2 py-0.5 text-danger font-bold hover:bg-elevated/80"
+              >
+                -5.0% (标准)
+              </button>
+            </div>
+
+            {/* 智能算仓实时测算看板 */}
+            <div className="rounded-lg border border-border bg-base/70 p-3 space-y-2">
+              <div className="text-[11px] font-bold text-foreground flex items-center justify-between">
+                <span>智能算仓与分级止盈预览 (1R = ¥{customSizing.riskAmount.toFixed(0)})</span>
+                <span className="text-accent font-mono">{customSizing.finalShares} 股 (¥{customSizing.orderAmt.toLocaleString()})</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-[10px] text-center pt-1 border-t border-border/60">
+                <div>
+                  <div className="text-muted">占总资金比例</div>
+                  <div className="font-mono font-bold text-foreground">{(customSizing.posPct * 100).toFixed(1)}% (≤15%)</div>
+                </div>
+                <div>
+                  <div className="text-muted">首笔50%底仓</div>
+                  <div className="font-mono font-bold text-accent">{customSizing.firstTranche} 股</div>
+                </div>
+                <div>
+                  <div className="text-muted">补仓50%仓位</div>
+                  <div className="font-mono font-bold text-accent">{customSizing.secondTranche} 股</div>
+                </div>
+              </div>
+              <div className="text-[10px] text-secondary pt-1 flex justify-between">
+                <span>🎯 阶梯目标:</span>
+                <span className="font-mono">
+                  +1R(保本): <strong className="text-blue-400">¥{customSizing.tp1.toFixed(2)}</strong> | +1.5R(卖1/3): <strong className="text-emerald-400">¥{customSizing.tp15.toFixed(2)}</strong> | +2R: <strong className="text-emerald-400">¥{customSizing.tp2.toFixed(2)}</strong>
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-muted">策略标签</label>
+              <input
+                type="text"
+                value={customStrategy}
+                onChange={(e) => setCustomStrategy(e.target.value)}
+                placeholder="例如: 突破MA20 / 涨停缩量回踩 / 资金共振"
+                className="w-full rounded-lg border border-border bg-base px-3 py-2 text-foreground focus:border-violet-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-muted">买入逻辑 / 自选备注</label>
+              <input
+                type="text"
+                value={customReason}
+                onChange={(e) => setCustomReason(e.target.value)}
+                placeholder="例如: 板块领涨龙头，形态良好，资金介入"
+                className="w-full rounded-lg border border-border bg-base px-3 py-2 text-foreground focus:border-violet-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setCustomPlanOpen(false)}
+                className="rounded-lg border border-border px-4 py-2 text-muted hover:bg-elevated cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (!customSymbol) {
+                    toast('请先搜索或选定要加入的股票标的', 'error')
+                    return
+                  }
+                  saveCustomPlanMut.mutate({
+                    symbol: customSymbol,
+                    name: customName || customSymbol,
+                    buy_price: customBuyPrice,
+                    stop_loss_price: customStopLossPrice,
+                    strategies: [customStrategy || '自定义计划'],
+                    reasons: [customReason || '用户自选加入计划', '严格执行短线纪律与算仓'],
+                  })
+                }}
+                className="rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 px-4 py-2 font-bold text-white shadow cursor-pointer"
+              >
+                加入开盘执行计划
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ===== 弹窗 2: 买入确认 / 录入持仓 ===== */}
       {buyModalItem && (
         <Modal onClose={() => setBuyModalItem(null)}>
           <div className="p-5 space-y-4 text-xs">
@@ -888,7 +1189,7 @@ export function TradePlan() {
         </Modal>
       )}
 
-      {/* ===== 弹窗 2: 平仓录入 ===== */}
+      {/* ===== 弹窗 3: 平仓录入 ===== */}
       {closeModalItem && (
         <Modal onClose={() => setCloseModalItem(null)}>
           <div className="p-5 space-y-4 text-xs">
@@ -977,7 +1278,7 @@ export function TradePlan() {
         </Modal>
       )}
 
-      {/* ===== 弹窗 3: 交易风控参数设置 ===== */}
+      {/* ===== 弹窗 4: 交易风控参数设置 ===== */}
       {settingsOpen && (
         <Modal onClose={() => setSettingsOpen(false)}>
           <div className="p-5 space-y-4 text-xs">
@@ -1092,4 +1393,8 @@ export function TradePlan() {
       />
     </div>
   )
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100
 }
