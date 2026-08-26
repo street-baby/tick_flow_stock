@@ -124,3 +124,20 @@ def delete_custom_plan(request: Request, symbol: str):
     srv = _get_service(request)
     return srv.delete_custom_plan(symbol)
 
+
+@router.get("/quote-lookup")
+def lookup_stock_quote(
+    request: Request,
+    symbol: str = Query(..., description="股票代码，如 601579.SH"),
+    buy_price: float | None = Query(None, description="自定义计划买入价"),
+    stop_loss_pct: float | None = Query(None, description="自定义止损比例，如 0.05"),
+):
+    """根据股票代码实时获取最新价格，并自动测算买入价、止损价、算仓股数与止盈阶梯。"""
+    srv = _get_service(request)
+    return srv.lookup_stock_plan_preview(
+        symbol=symbol,
+        custom_buy_price=buy_price,
+        custom_stop_loss_pct=stop_loss_pct,
+    )
+
+

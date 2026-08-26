@@ -2550,6 +2550,31 @@ export const api = {
     request<TradePlanItem[]>(`/api/trade-plan/custom/${encodeURIComponent(symbol)}`, {
       method: 'DELETE',
     }),
+  tradePlanQuoteLookup: (symbol: string, buyPrice?: number, stopLossPct?: number) =>
+    request<{
+      symbol: string
+      name: string
+      latest_price: number
+      change_pct: number
+      buy_price: number
+      stop_loss_price: number
+      stop_loss_pct: number
+      per_share_risk: number
+      single_risk_amount: number
+      suggested_shares: number
+      order_amount: number
+      position_pct: number
+      first_tranche_shares: number
+      second_tranche_shares: number
+      tp_1r: number
+      tp_15r: number
+      tp_2r: number
+      max_open_price: number
+    }>(
+      `/api/trade-plan/quote-lookup?symbol=${encodeURIComponent(symbol)}${
+        buyPrice ? `&buy_price=${buyPrice}` : ''
+      }${stopLossPct ? `&stop_loss_pct=${stopLossPct}` : ''}`
+    ),
 }
 
 export interface AuctionAIAnalysisItem {

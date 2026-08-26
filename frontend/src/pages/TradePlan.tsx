@@ -49,10 +49,12 @@ export function TradePlan() {
   const [searchResults, setSearchResults] = useState<Array<{ symbol: string; name: string; type?: string }>>([])
   const [customSymbol, setCustomSymbol] = useState('')
   const [customName, setCustomName] = useState('')
+  const [customLatestPrice, setCustomLatestPrice] = useState<number>(10.0)
   const [customBuyPrice, setCustomBuyPrice] = useState<number>(10.0)
   const [customStopLossPrice, setCustomStopLossPrice] = useState<number>(9.5)
   const [customStrategy, setCustomStrategy] = useState('自选短线突破')
-  const [customReason, setCustomReason] = useState('形态良好，资金介入，符合短线风控')
+  const [customReason, setCustomReason] = useState('形态良好，资金介入，严格执行短线风控')
+  const [isLookingUp, setIsLookingUp] = useState(false)
 
   // Manual buy / execute modal
   const [buyModalItem, setBuyModalItem] = useState<TradePlanItem | null>(null)
@@ -120,6 +122,28 @@ export function TradePlan() {
     }, 200)
     return () => clearTimeout(timer)
   }, [searchQuery])
+
+  // Select stock and auto-lookup live quote
+  const handleSelectStock = async (item: { symbol: string; name: string }) => {
+    setCustomSymbol(item.symbol)
+    setCustomName(item.name)
+    setSearchQuery(`${item.name} (${item.symbol})`)
+    setSearchResults([])
+    setIsLookingUp(true)
+
+    try {
+      const quoteRes = await api.tradePlanQuoteLookup(item.symbol)
+      if (quoteRes && quoteRes.buy_price > 0) {
+        setCustomLatestPrice(quoteRes.latest_price)
+        setCustomBuyPrice(quoteRes.buy_price)
+        setCustomStopLossPrice(quoteRes.stop_loss_price)
+      }
+    } catch {
+      // fallback
+    } finally {
+      setIsLookingUp(false)
+    }
+  }
 
   // Queries
   const { data: dailyData, isLoading: dailyLoading, refetch: refetchDaily } = useQuery({
@@ -221,13 +245,13 @@ export function TradePlan() {
     return positions.filter(p => p.action_alerts && p.action_alerts.length > 0).length
   }, [positions])
 
-  // Custom plan sizing preview
+  // Custom plan live calculations (0.5% risk, 15% single stock cap, 100-share lot)
   const customSizing = useMemo(() => {
     const equity = riskInfo?.account_equity || 50000
     const riskRatio = riskInfo?.risk_ratio || 0.005
     const riskAmount = equity * riskRatio
     const buyP = customBuyPrice > 0 ? customBuyPrice : 10.0
-    const slP = customStopLossPrice > 0 ? customStopLossPrice : buyP * 0.95
+    const slP = customStopLossPrice > 0 ? customStopLossPrice : round2(buyP * 0.95)
     const perShareRisk = Math.max(0.01, buyP - slP)
     const slPct = perShareRisk / buyP
     const theoShares = riskAmount / perShareRisk
@@ -238,20 +262,29 @@ export function TradePlan() {
     const posPct = orderAmt / equity
     const firstTranche = Math.max(100, Math.floor((finalShares * 0.5) / 100) * 100)
     const secondTranche = Math.max(0, finalShares - firstTranche)
+    const totalMaxLoss = finalShares * perShareRisk
     const tp1 = buyP + perShareRisk * 1.0
     const tp15 = buyP + perShareRisk * 1.5
     const tp2 = buyP + perShareRisk * 2.0
+    const maxOpenPrice = round2(buyP * 1.03)
+
     return {
+      buyP,
+      slP,
       finalShares,
       orderAmt,
       posPct,
       slPct,
+      perShareRisk,
       firstTranche,
       secondTranche,
       tp1,
       tp15,
       tp2,
+      maxOpenPrice,
       riskAmount,
+      totalMaxLoss,
+      equity,
     }
   }, [customBuyPrice, customStopLossPrice, riskInfo])
 
@@ -495,7 +528,7 @@ export function TradePlan() {
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-violet-400" />
               <span>
-                基准选股日: <span className="font-mono font-medium text-foreground">{dailyData?.date || '最新'}</span> · 系统策略 + 自定义计划统一风控
+                基准选股日: <span className="font-mono font-medium text-foreground">{dailyData?.date || '最新'}</span> · 严格显示买入价、止损价、算仓股数与分级止盈
               </span>
             </div>
             <div className="text-[11px] text-amber-400">
@@ -599,12 +632,12 @@ export function TradePlan() {
                       ))}
                     </div>
 
-                    {/* 算仓与风控矩阵 */}
+                    {/* 核心风控与算仓矩阵 */}
                     <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-lg border border-border/80 bg-surface/80 p-2.5 text-center">
                       <div>
                         <div className="text-[10px] text-muted">计划买入价</div>
                         <div className="mt-0.5 font-mono text-xs font-bold text-foreground">¥{item.buy_price.toFixed(2)}</div>
-                        <div className="mt-0.5 text-[9px] text-muted">高开上限: ¥{item.max_open_price.toFixed(2)}</div>
+                        <div className="mt-0.5 text-[9px] text-amber-400">高开上限: ¥{item.max_open_price.toFixed(2)}</div>
                       </div>
                       <div>
                         <div className="text-[10px] text-muted">严格止损价</div>
@@ -612,28 +645,28 @@ export function TradePlan() {
                         <div className="mt-0.5 font-mono text-[9px] text-danger">-{ (item.stop_loss_pct * 100).toFixed(1) }%</div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-muted">建议开仓总额</div>
-                        <div className="mt-0.5 font-mono text-xs font-bold text-foreground">¥{item.order_amount.toLocaleString()}</div>
-                        <div className="mt-0.5 font-mono text-[9px] text-muted">{item.suggested_shares}股 ({(item.position_pct * 100).toFixed(1)}%)</div>
+                        <div className="text-[10px] text-muted">计划买入总股数</div>
+                        <div className="mt-0.5 font-mono text-xs font-bold text-accent">{item.suggested_shares} 股</div>
+                        <div className="mt-0.5 font-mono text-[9px] text-foreground">¥{item.order_amount.toLocaleString()} ({(item.position_pct * 100).toFixed(1)}%)</div>
                       </div>
                     </div>
 
                     {/* 分批执行与分级止盈阶梯 */}
                     <div className="mt-3 space-y-1.5 text-[11px]">
-                      <div className="flex items-center justify-between rounded bg-base/40 px-2 py-1">
-                        <span className="text-muted">⚡ 分批建仓指引:</span>
+                      <div className="flex items-center justify-between rounded bg-base/40 px-2.5 py-1.5">
+                        <span className="text-muted">⚡ 分批买入执行:</span>
                         <span className="font-medium text-foreground">
-                          开盘先买 50% 底仓 (<span className="text-accent font-mono">{item.first_tranche_shares}股</span>) → 走势确认补 50% (<span className="text-accent font-mono">{item.second_tranche_shares}股</span>)
+                          开盘首笔 50% (<span className="text-accent font-mono font-bold">{item.first_tranche_shares}股</span>) → 走势确认补 50% (<span className="text-accent font-mono font-bold">{item.second_tranche_shares}股</span>)
                         </span>
                       </div>
-                      <div className="flex items-center justify-between rounded bg-base/40 px-2 py-1">
-                        <span className="text-muted">🎯 分级止盈阶梯:</span>
+                      <div className="flex items-center justify-between rounded bg-base/40 px-2.5 py-1.5">
+                        <span className="text-muted">🎯 严格分级止盈:</span>
                         <span className="font-mono text-foreground">
-                          <span className="text-blue-400">1R(保本): ¥{item.tp_1r.toFixed(2)}</span>
+                          <span className="text-blue-400 font-bold">+1R(保本): ¥{item.tp_1r.toFixed(2)}</span>
                           <span className="mx-1 text-muted/40">|</span>
-                          <span className="text-emerald-400">1.5R(卖1/3): ¥{item.tp_15r.toFixed(2)}</span>
+                          <span className="text-emerald-400 font-bold">+1.5R(卖1/3): ¥{item.tp_15r.toFixed(2)}</span>
                           <span className="mx-1 text-muted/40">|</span>
-                          <span className="text-emerald-400">2R: ¥{item.tp_2r.toFixed(2)}</span>
+                          <span className="text-emerald-400 font-bold">+2R: ¥{item.tp_2r.toFixed(2)}</span>
                         </span>
                       </div>
                     </div>
@@ -650,7 +683,7 @@ export function TradePlan() {
                       className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 py-2 text-xs font-bold text-white shadow-sm transition-all cursor-pointer"
                     >
                       <Zap className="h-3.5 w-3.5" />
-                      <span>确认买入 / 录入持仓</span>
+                      <span>确认买入 {item.suggested_shares} 股 (¥{item.order_amount.toLocaleString()})</span>
                     </button>
 
                     <button
@@ -724,7 +757,7 @@ export function TradePlan() {
                         <div className="mt-1 flex items-center gap-3 text-xs">
                           <span className="text-muted">买入成本: <span className="font-mono text-foreground font-medium">¥{pos.buy_price.toFixed(2)}</span></span>
                           <span className="text-muted">现价: <span className="font-mono text-foreground font-bold">¥{pos.current_price.toFixed(2)}</span></span>
-                          <span className="text-muted">持仓: <span className="font-mono text-foreground">{pos.shares}股</span></span>
+                          <span className="text-muted">持仓: <span className="font-mono text-accent font-bold">{pos.shares}股</span></span>
                         </div>
                       </div>
                     </div>
@@ -907,7 +940,7 @@ export function TradePlan() {
         </div>
       )}
 
-      {/* ===== 弹窗 1: 自定义加入买入计划 ===== */}
+      {/* ===== 弹窗 1: 自定义加入买入计划 (输入代码/名称 即自动获取真实价格并计算买入、严格止损、严格止盈与买入股数) ===== */}
       {customPlanOpen && (
         <Modal onClose={() => setCustomPlanOpen(false)}>
           <div className="p-5 space-y-4 text-xs">
@@ -918,7 +951,7 @@ export function TradePlan() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-foreground">自定义加入开盘买入计划</h3>
-                  <p className="text-[11px] text-muted">系统将自动按 0.5% 单笔风控与 15% 仓位上限为您精准算仓</p>
+                  <p className="text-[11px] text-muted">严格按 0.5% 单笔风险（{riskInfo?.single_risk_amount ?? 250}元）与 15% 仓位上限自动算仓</p>
                 </div>
               </div>
               <button onClick={() => setCustomPlanOpen(false)} className="text-muted hover:text-foreground">
@@ -928,33 +961,29 @@ export function TradePlan() {
 
             {/* 股票搜索/输入 */}
             <div className="relative space-y-1">
-              <label className="text-muted">搜索或输入股票代码/名称</label>
+              <label className="text-muted font-medium">搜索股票代码或名称</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
                 <input
                   type="text"
-                  placeholder="例如: 603366 / 日出东方 / 000628"
+                  placeholder="输入代码或名称 (如: 601579 / 会稽山 / 603366)"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full rounded-lg border border-border bg-base pl-9 pr-3 py-2 text-foreground focus:border-violet-500 focus:outline-none"
+                  autoFocus
                 />
               </div>
 
               {/* 搜索建议列表 */}
               {searchResults.length > 0 && (
-                <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
+                <div className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-surface shadow-xl">
                   {searchResults.map((s) => (
                     <button
                       key={s.symbol}
-                      onClick={() => {
-                        setCustomSymbol(s.symbol)
-                        setCustomName(s.name)
-                        setSearchQuery(`${s.name} (${s.symbol})`)
-                        setSearchResults([])
-                      }}
-                      className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-elevated cursor-pointer"
+                      onClick={() => handleSelectStock(s)}
+                      className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-violet-500/10 cursor-pointer border-b border-border/40 last:border-0"
                     >
-                      <span className="font-medium text-foreground">{s.name}</span>
+                      <span className="font-bold text-foreground">{s.name}</span>
                       <span className="font-mono text-muted text-[11px]">{s.symbol}</span>
                     </button>
                   ))}
@@ -963,15 +992,26 @@ export function TradePlan() {
             </div>
 
             {customSymbol && (
-              <div className="flex items-center gap-2 rounded-lg bg-violet-500/10 border border-violet-500/20 px-3 py-2 text-violet-300">
-                <CheckCircle2 className="h-4 w-4 text-violet-400" />
-                <span>已选定标的: <strong>{customName}</strong> ({customSymbol})</span>
+              <div className="flex items-center justify-between rounded-lg bg-violet-500/10 border border-violet-500/20 px-3 py-2 text-violet-300">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-violet-400 shrink-0" />
+                  <span>已选定标的: <strong className="text-white text-sm">{customName}</strong> <span className="font-mono text-xs text-violet-200">({customSymbol})</span></span>
+                </div>
+                {isLookingUp ? (
+                  <span className="text-[10px] text-muted animate-pulse">正在获取行情...</span>
+                ) : (
+                  <span className="font-mono text-xs font-bold text-accent">最新价: ¥{customLatestPrice.toFixed(2)}</span>
+                )}
               </div>
             )}
 
+            {/* 买入价与严格止损价设定 */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-muted">计划买入价格 (元)</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-muted font-medium">计划买入价格 (元)</label>
+                  <span className="text-[10px] text-amber-400">高开上限: ¥{customSizing.maxOpenPrice.toFixed(2)}</span>
+                </div>
                 <input
                   type="number"
                   step="0.01"
@@ -981,15 +1021,15 @@ export function TradePlan() {
                     setCustomBuyPrice(v)
                     setCustomStopLossPrice(round2(v * 0.95))
                   }}
-                  className="w-full rounded-lg border border-border bg-base px-3 py-2 font-mono text-foreground focus:border-violet-500 focus:outline-none"
+                  className="w-full rounded-lg border border-border bg-base px-3 py-2 font-mono text-foreground font-bold focus:border-violet-500 focus:outline-none"
                 />
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-muted">严格止损价 (元)</label>
-                  <span className="font-mono text-danger text-[10px]">
-                    -{(customSizing.slPct * 100).toFixed(1)}%
+                  <label className="text-muted font-medium">严格止损价 (元)</label>
+                  <span className="font-mono text-danger font-bold text-[11px]">
+                    -{(customSizing.slPct * 100).toFixed(1)}% (每股亏¥{customSizing.perShareRisk.toFixed(2)})
                   </span>
                 </div>
                 <input
@@ -997,62 +1037,96 @@ export function TradePlan() {
                   step="0.01"
                   value={customStopLossPrice}
                   onChange={(e) => setCustomStopLossPrice(parseFloat(e.target.value) || 0)}
-                  className="w-full rounded-lg border border-border bg-base px-3 py-2 font-mono text-foreground focus:border-violet-500 focus:outline-none"
+                  className="w-full rounded-lg border border-border bg-base px-3 py-2 font-mono text-danger font-bold focus:border-violet-500 focus:outline-none"
                 />
               </div>
             </div>
 
-            {/* 快速止损比例调节按钮 */}
+            {/* 快捷止损选择 */}
             <div className="flex items-center gap-2 text-[10px]">
-              <span className="text-muted">快捷止损幅度:</span>
+              <span className="text-muted">快捷调整止损幅度:</span>
               <button
                 type="button"
                 onClick={() => setCustomStopLossPrice(round2(customBuyPrice * 0.97))}
-                className="rounded bg-elevated px-2 py-0.5 text-foreground hover:bg-elevated/80"
+                className="rounded bg-elevated px-2 py-1 text-foreground hover:bg-elevated/80 cursor-pointer"
               >
-                -3.0%
+                -3.0% (激进紧贴)
               </button>
               <button
                 type="button"
                 onClick={() => setCustomStopLossPrice(round2(customBuyPrice * 0.96))}
-                className="rounded bg-elevated px-2 py-0.5 text-foreground hover:bg-elevated/80"
+                className="rounded bg-elevated px-2 py-1 text-foreground hover:bg-elevated/80 cursor-pointer"
               >
                 -4.0%
               </button>
               <button
                 type="button"
                 onClick={() => setCustomStopLossPrice(round2(customBuyPrice * 0.95))}
-                className="rounded bg-elevated px-2 py-0.5 text-danger font-bold hover:bg-elevated/80"
+                className="rounded bg-danger/15 border border-danger/30 px-2 py-1 text-danger font-bold hover:bg-danger/25 cursor-pointer"
               >
-                -5.0% (标准)
+                -5.0% (标准纪律)
               </button>
             </div>
 
-            {/* 智能算仓实时测算看板 */}
-            <div className="rounded-lg border border-border bg-base/70 p-3 space-y-2">
-              <div className="text-[11px] font-bold text-foreground flex items-center justify-between">
-                <span>智能算仓与分级止盈预览 (1R = ¥{customSizing.riskAmount.toFixed(0)})</span>
-                <span className="text-accent font-mono">{customSizing.finalShares} 股 (¥{customSizing.orderAmt.toLocaleString()})</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-[10px] text-center pt-1 border-t border-border/60">
-                <div>
-                  <div className="text-muted">占总资金比例</div>
-                  <div className="font-mono font-bold text-foreground">{(customSizing.posPct * 100).toFixed(1)}% (≤15%)</div>
+            {/* ===== 核心算仓与分级止盈大看板 ===== */}
+            <div className="rounded-xl border border-violet-500/30 bg-gradient-to-br from-base/90 via-surface to-base/90 p-4 space-y-3 shadow-inner">
+              <div className="flex items-center justify-between border-b border-border/80 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <ShieldAlert className="h-4 w-4 text-violet-400" />
+                  <span className="text-xs font-bold text-foreground">
+                    智能算仓结果 (1R 风险上限: ¥{customSizing.riskAmount.toFixed(0)})
+                  </span>
                 </div>
-                <div>
-                  <div className="text-muted">首笔50%底仓</div>
-                  <div className="font-mono font-bold text-accent">{customSizing.firstTranche} 股</div>
-                </div>
-                <div>
-                  <div className="text-muted">补仓50%仓位</div>
-                  <div className="font-mono font-bold text-accent">{customSizing.secondTranche} 股</div>
+                <div className="text-right">
+                  <div className="font-mono text-sm font-extrabold text-accent">
+                    计划买入 {customSizing.finalShares} 股 (¥{customSizing.orderAmt.toLocaleString()})
+                  </div>
+                  <div className="text-[10px] text-muted">
+                    单笔最大亏损: <span className="text-danger font-mono font-bold">¥{customSizing.totalMaxLoss.toFixed(1)}</span> ({(customSizing.posPct * 100).toFixed(1)}% 仓位 ≤15%上限)
+                  </div>
                 </div>
               </div>
-              <div className="text-[10px] text-secondary pt-1 flex justify-between">
-                <span>🎯 阶梯目标:</span>
-                <span className="font-mono">
-                  +1R(保本): <strong className="text-blue-400">¥{customSizing.tp1.toFixed(2)}</strong> | +1.5R(卖1/3): <strong className="text-emerald-400">¥{customSizing.tp15.toFixed(2)}</strong> | +2R: <strong className="text-emerald-400">¥{customSizing.tp2.toFixed(2)}</strong>
-                </span>
+
+              {/* 开盘分批拆分 */}
+              <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                <div className="rounded-lg bg-base/80 p-2 border border-border/60">
+                  <div className="text-[10px] text-muted">⚡ 开盘首笔 50% 底仓</div>
+                  <div className="mt-0.5 font-mono text-sm font-bold text-accent">{customSizing.firstTranche} 股</div>
+                  <div className="text-[10px] text-muted">金额: ¥{(customSizing.firstTranche * customBuyPrice).toFixed(0)}</div>
+                </div>
+                <div className="rounded-lg bg-base/80 p-2 border border-border/60">
+                  <div className="text-[10px] text-muted">⚡ 走势确认补 50% 仓位</div>
+                  <div className="mt-0.5 font-mono text-sm font-bold text-accent">{customSizing.secondTranche} 股</div>
+                  <div className="text-[10px] text-muted">金额: ¥{(customSizing.secondTranche * customBuyPrice).toFixed(0)}</div>
+                </div>
+              </div>
+
+              {/* 严格分级止盈阶梯 */}
+              <div className="rounded-lg bg-base/80 p-2.5 border border-border/60 space-y-1.5">
+                <div className="text-[11px] font-bold text-foreground flex items-center justify-between">
+                  <span>🎯 严格分级止盈路线图</span>
+                  <span className="text-[10px] text-muted">阶梯式执行，杜绝坐过山车</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+                  <div className="rounded bg-blue-500/10 border border-blue-500/20 p-1.5">
+                    <div className="text-blue-300 font-medium">+1.0R (保本)</div>
+                    <div className="font-mono text-xs font-bold text-blue-400 mt-0.5">¥{customSizing.tp1.toFixed(2)}</div>
+                    <div className="text-muted text-[9px]">止损移至成本价</div>
+                  </div>
+                  <div className="rounded bg-emerald-500/10 border border-emerald-500/20 p-1.5">
+                    <div className="text-emerald-300 font-medium">+1.5R (卖1/3)</div>
+                    <div className="font-mono text-xs font-bold text-emerald-400 mt-0.5">¥{customSizing.tp15.toFixed(2)}</div>
+                    <div className="text-emerald-400 text-[9px]">卖出 {Math.max(100, Math.floor(customSizing.finalShares / 3 / 100) * 100)} 股</div>
+                  </div>
+                  <div className="rounded bg-emerald-500/10 border border-emerald-500/20 p-1.5">
+                    <div className="text-emerald-300 font-medium">+2.0R (卖1/3)</div>
+                    <div className="font-mono text-xs font-bold text-emerald-400 mt-0.5">¥{customSizing.tp2.toFixed(2)}</div>
+                    <div className="text-emerald-400 text-[9px]">再卖出 {Math.max(100, Math.floor(customSizing.finalShares / 3 / 100) * 100)} 股</div>
+                  </div>
+                </div>
+                <div className="text-[10px] text-muted text-center pt-0.5">
+                  剩余仓位: 跌破 MA5 或自最高点回撤 2.5% 止盈清仓
+                </div>
               </div>
             </div>
 
@@ -1097,7 +1171,11 @@ export function TradePlan() {
                     buy_price: customBuyPrice,
                     stop_loss_price: customStopLossPrice,
                     strategies: [customStrategy || '自定义计划'],
-                    reasons: [customReason || '用户自选加入计划', '严格执行短线纪律与算仓'],
+                    reasons: [
+                      customReason || '用户自选加入计划',
+                      `计划买入 ${customSizing.finalShares} 股 (1R风控 ¥${customSizing.riskAmount.toFixed(0)})`,
+                      `严格止损线 ¥${customStopLossPrice.toFixed(2)} (-${(customSizing.slPct*100).toFixed(1)}%)`,
+                    ],
                   })
                 }}
                 className="rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 px-4 py-2 font-bold text-white shadow cursor-pointer"

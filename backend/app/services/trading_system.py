@@ -433,6 +433,87 @@ class TradingSystemService:
             logger.warning("Failed to load custom plans: %s", e)
             return []
 
+    def lookup_stock_plan_preview(
+        self,
+        symbol: str,
+        custom_buy_price: float | None = None,
+        custom_stop_loss_pct: float | None = None,
+    ) -> dict[str, Any]:
+        """根据股票代码实时获取最新价格，并自动测算计划买入价、严格止损价、算仓股数及分级止盈价。"""
+        settings = self.get_settings()
+        account_equity = settings["account_equity"]
+        single_risk_amount = account_equity * settings["base_risk_ratio"]
+        
+        # 1. 查找名称
+        name = symbol
+        inst_path = self.data_dir / "instruments/instruments.parquet"
+        if inst_path.exists():
+            try:
+                df_inst = pl.read_parquet(inst_path)
+                m = df_inst.filter(pl.col("symbol") == symbol).to_dicts()
+                if m:
+                    name = m[0].get("name", symbol)
+            except Exception:
+                pass
+                
+        # 2. 查找最新收盘价或现价
+        latest_price = 10.0
+        change_pct = 0.0
+        try:
+            df = pl.scan_parquet(str(self.data_dir / "kline_daily_enriched/**/*.parquet")).filter(pl.col("symbol") == symbol).collect()
+            if len(df) > 0:
+                last_row = df.sort("date").tail(1).to_dicts()[0]
+                latest_price = float(last_row.get("close") or last_row.get("raw_close") or 10.0)
+                change_pct = float(last_row.get("change_pct") or 0.0)
+        except Exception as e:
+            logger.warning("Error fetching quote for %s: %s", symbol, e)
+            
+        buy_price = float(custom_buy_price) if (custom_buy_price is not None and custom_buy_price > 0) else latest_price
+        sl_pct = float(custom_stop_loss_pct) if (custom_stop_loss_pct is not None and custom_stop_loss_pct > 0) else settings["max_stop_loss_pct"]
+        
+        stop_loss_price = round(buy_price * (1 - sl_pct), 2)
+        per_share_risk = max(0.01, buy_price - stop_loss_price)
+        
+        theoretical_shares = single_risk_amount / per_share_risk
+        max_stock_amount = account_equity * settings["max_single_position_pct"]
+        max_allowed_shares = int(max_stock_amount / buy_price) if buy_price > 0 else 0
+        
+        final_shares = int(min(theoretical_shares, max_allowed_shares) // 100 * 100)
+        if final_shares < 100:
+            final_shares = 100
+            
+        order_amount = round(final_shares * buy_price, 2)
+        position_pct = round(order_amount / account_equity, 4)
+        
+        first_tranche_shares = int((final_shares * 0.5) // 100 * 100) or 100
+        second_tranche_shares = max(0, final_shares - first_tranche_shares)
+        
+        tp_1r = round(buy_price + per_share_risk * 1.0, 2)
+        tp_15r = round(buy_price + per_share_risk * 1.5, 2)
+        tp_2r = round(buy_price + per_share_risk * 2.0, 2)
+        max_open_price = round(buy_price * (1 + settings["max_open_chg_pct"]), 2)
+        
+        return {
+            "symbol": symbol,
+            "name": name,
+            "latest_price": round(latest_price, 2),
+            "change_pct": round(change_pct, 4),
+            "buy_price": round(buy_price, 2),
+            "stop_loss_price": stop_loss_price,
+            "stop_loss_pct": round(sl_pct, 4),
+            "per_share_risk": round(per_share_risk, 2),
+            "single_risk_amount": round(single_risk_amount, 2),
+            "suggested_shares": final_shares,
+            "order_amount": order_amount,
+            "position_pct": position_pct,
+            "first_tranche_shares": first_tranche_shares,
+            "second_tranche_shares": second_tranche_shares,
+            "tp_1r": tp_1r,
+            "tp_15r": tp_15r,
+            "tp_2r": tp_2r,
+            "max_open_price": max_open_price,
+        }
+
     def save_custom_plan(self, plan_data: dict[str, Any]) -> list[dict[str, Any]]:
         """保存/更新一条用户自定义开盘买入计划，并自动计算风控仓位与分级止盈价。"""
         settings = self.get_settings()
