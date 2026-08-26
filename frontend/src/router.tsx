@@ -29,6 +29,7 @@ const Regime = lazy(() => import('./pages/Regime').then(m => ({ default: m.Regim
 const TomorrowCatalyst = lazy(() => import('./pages/TomorrowCatalyst').then(m => ({ default: m.TomorrowCatalyst })))
 const AuctionSnatch = lazy(() => import('./pages/AuctionSnatch').then(m => ({ default: m.AuctionSnatch })))
 const DarkPoolRanking = lazy(() => import('./pages/DarkPoolRanking').then(m => ({ default: m.DarkPoolRanking })))
+const TradePlan = lazy(() => import('./pages/TradePlan').then(m => ({ default: m.TradePlan })))
 const Dev = lazy(() => import('./pages/Dev').then(m => ({ default: m.Dev })))
 
 // 首次使用守卫 —— 未完成向导则重定向到 /onboarding
@@ -90,6 +91,7 @@ export const router = createBrowserRouter([
       { path: 'tomorrow-catalysts', element: <TomorrowCatalyst /> },
       { path: 'auction', element: <AuctionSnatch /> },
       { path: 'darkpool', element: <DarkPoolRanking /> },
+      { path: 'trade-plan', element: <TradePlan /> },
       { path: 'news', element: <Navigate to="/tomorrow-catalysts" replace /> },
       { path: 'branding', element: <Branding /> },
       { path: 'settings', element: <Settings /> },

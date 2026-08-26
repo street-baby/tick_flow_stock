@@ -35,6 +35,7 @@ import {
   TrendingUp,
   Flame,
   Zap,
+  Target,
   BarChart3,
   Gauge,
   Sparkles,
@@ -115,6 +116,7 @@ const NAV_GROUPS: NavCategoryDef[] = [
   {
     category: '实战工具',
     items: [
+      { to: '/trade-plan', label: '开盘交易面板', icon: Target, badge: '实战' },
       { to: '/tomorrow-catalysts', label: '明天炒什么', icon: Zap, badge: '热' },
       { to: '/auction', label: '竞价抢筹', icon: Zap, badge: '9:25' },
       { to: '/darkpool', label: '暗盘资金', icon: EyeOff, badge: '主力' },

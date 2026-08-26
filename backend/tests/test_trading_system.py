@@ -1,0 +1,91 @@
+"""测试短线趋势资金共振交易系统 (Trade Plan Service & API)."""
+from pathlib import Path
+from types import SimpleNamespace
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+
+from app.services.trading_system import TradingSystemService
+from app.api.trade_plan import router as trade_plan_router
+
+
+def test_trading_system_settings(tmp_path: Path):
+    srv = TradingSystemService(tmp_path)
+    s = srv.get_settings()
+    assert s["account_equity"] == 50000.0
+    assert s["base_risk_ratio"] == 0.005
+    assert s["max_single_position_pct"] == 0.15
+
+    # 更新设置
+    updated = srv.save_settings({"account_equity": 60000.0, "base_risk_ratio": 0.006})
+    assert updated["account_equity"] == 60000.0
+    assert updated["base_risk_ratio"] == 0.006
+
+    # 重新加载
+    s2 = srv.get_settings()
+    assert s2["account_equity"] == 60000.0
+
+
+def test_trading_system_positions_and_exit(tmp_path: Path):
+    srv = TradingSystemService(tmp_path)
+    
+    # 1. 录入一笔持仓
+    pos_data = {
+        "symbol": "603366.SH",
+        "name": "日出东方",
+        "buy_price": 10.0,
+        "shares": 500,
+        "stop_loss_price": 9.5,
+        "tp_1r": 10.5,
+        "tp_15r": 10.75,
+        "tp_2r": 11.0,
+        "entry_strategy": "MA20回踩/缩量十字星",
+    }
+    positions = srv.add_position(pos_data)
+    assert len(positions) == 1
+    assert positions[0]["symbol"] == "603366.SH"
+    assert positions[0]["shares"] == 500
+
+    # 2. 部分平仓 (卖出 200 股)
+    res = srv.close_position("603366.SH", sell_price=10.75, sell_shares=200, reason="达成+1.5R分批止盈")
+    assert res["success"] is True
+    assert res["closed_trade"]["realized_pnl"] == 150.0  # (10.75 - 10.0) * 200
+    assert len(res["remaining_positions"]) == 1
+    assert res["remaining_positions"][0]["shares"] == 300
+
+    # 3. 查看复盘历史
+    history = srv.get_trade_history()
+    assert history["summary"]["total_trades"] == 1
+    assert history["summary"]["win_rate"] == 1.0
+    assert history["summary"]["total_pnl"] == 150.0
+
+    # 4. 全额清仓剩余 300 股
+    res2 = srv.close_position("603366.SH", sell_price=11.0, sell_shares=300, reason="达成+2.0R清仓")
+    assert res2["success"] is True
+    assert len(res2["remaining_positions"]) == 0
+    assert res2["closed_trade"]["realized_pnl"] == 300.0
+
+
+def test_trade_plan_api_routes(tmp_path: Path):
+    app = FastAPI()
+    app.state.repo = SimpleNamespace(store=SimpleNamespace(data_dir=tmp_path))
+    app.include_router(trade_plan_router)
+    client = TestClient(app)
+
+    # 市场环境门控
+    res = client.get("/api/trade-plan/market-gate")
+    assert res.status_code == 200
+    data = res.json()
+    assert "market_score" in data
+    assert "target_pos_max" in data
+    assert "max_positions" in data
+
+    # 设置读取与保存
+    res_set = client.get("/api/trade-plan/settings")
+    assert res_set.status_code == 200
+    set_data = res_set.json()
+    assert set_data["account_equity"] >= 0
+
+    # 保存设置
+    res_post_set = client.post("/api/trade-plan/settings", json={"account_equity": 80000.0})
+    assert res_post_set.status_code == 200
+    assert res_post_set.json()["account_equity"] == 80000.0

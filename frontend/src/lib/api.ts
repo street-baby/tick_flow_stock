@@ -2499,6 +2499,47 @@ export const api = {
     const s = qs.toString()
     return request<DarkpoolRankingResponse>(`/api/darkpool/ranking${s ? `?${s}` : ''}`)
   },
+
+  // ===== 短线趋势资金共振交易系统 (Trade Plan) =====
+  tradePlanMarketGate: () => request<MarketGateInfo>('/api/trade-plan/market-gate'),
+  tradePlanDaily: () => request<DailyTradePlanResponse>('/api/trade-plan/daily'),
+  tradePlanPositions: () => request<ActivePositionItem[]>('/api/trade-plan/positions'),
+  tradePlanAddPosition: (data: {
+    symbol: string
+    name?: string
+    buy_price: number
+    shares: number
+    stop_loss_price: number
+    tp_1r?: number
+    tp_15r?: number
+    tp_2r?: number
+    entry_strategy?: string
+    notes?: string
+  }) => request<ActivePositionItem[]>('/api/trade-plan/positions', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  tradePlanClosePosition: (data: {
+    symbol: string
+    sell_price: number
+    sell_shares?: number
+    reason?: string
+  }) => request<{
+    success: boolean
+    closed_trade?: TradeHistoryRecord
+    new_equity?: number
+    remaining_positions?: ActivePositionItem[]
+  }>('/api/trade-plan/positions/close', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  tradePlanHistory: () => request<TradeHistoryResponse>('/api/trade-plan/history'),
+  tradePlanSettings: () => request<TradingSettings>('/api/trade-plan/settings'),
+  tradePlanSaveSettings: (settings: Partial<TradingSettings>) =>
+    request<TradingSettings>('/api/trade-plan/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
 }
 
 export interface AuctionAIAnalysisItem {
@@ -2830,3 +2871,141 @@ export interface DarkpoolRankingResponse {
   }
   rows: DarkpoolRankingRow[]
 }
+
+// ===== 短线趋势资金共振交易系统 (Trade Plan) 接口 =====
+export interface MarketGateInfo {
+  market_score: number
+  market_state: string
+  market_label: string
+  target_pos_min: number
+  target_pos_max: number
+  max_positions: number
+  allowed_strategies: string[]
+  regime_desc: string
+  account_equity: number
+  peak_equity: number
+  drawdown_pct: number
+  protection_alert: string | null
+}
+
+export interface TradePlanItem {
+  symbol: string
+  name: string
+  close: number
+  change_pct: number
+  composite_score: number
+  trend_score: number
+  strategies: string[]
+  reasons: string[]
+  buy_price: number
+  stop_loss_price: number
+  stop_loss_pct: number
+  max_open_price: number
+  suggested_shares: number
+  order_amount: number
+  position_pct: number
+  first_tranche_shares: number
+  second_tranche_shares: number
+  tp_1r: number
+  tp_15r: number
+  tp_2r: number
+  trailing_stop_desc: string
+  max_holding_days: number
+  last_limit_date: string
+}
+
+export interface DailyTradePlanResponse {
+  date: string
+  market_gate: MarketGateInfo
+  risk_info: {
+    account_equity: number
+    risk_ratio: number
+    is_reduced_risk: boolean
+    single_risk_amount: number
+    consecutive_losses: number
+    max_single_position_pct: number
+  }
+  plans: TradePlanItem[]
+}
+
+export interface ActionAlert {
+  level: 'info' | 'warning' | 'danger' | 'success'
+  type: string
+  title: string
+  desc: string
+  suggested_action: string
+}
+
+export interface ActivePositionItem {
+  id: string
+  symbol: string
+  name: string
+  buy_price: number
+  current_price: number
+  highest_price: number
+  shares: number
+  market_value: number
+  floating_pnl: number
+  floating_pnl_pct: number
+  current_r: number
+  holding_days: number
+  tp_stage: number
+  stop_loss_price: number
+  tp_1r: number
+  tp_15r: number
+  tp_2r: number
+  entry_date: string
+  entry_strategy: string
+  notes?: string
+  action_alerts: ActionAlert[]
+}
+
+export interface TradeHistoryRecord {
+  id: string
+  symbol: string
+  name: string
+  entry_date: string
+  exit_date: string
+  buy_price: number
+  sell_price: number
+  shares: number
+  realized_pnl: number
+  realized_pnl_pct: number
+  holding_days: number
+  strategy: string
+  exit_reason: string
+  is_win: boolean
+}
+
+export interface TradeHistoryResponse {
+  trades: TradeHistoryRecord[]
+  summary: {
+    total_trades: number
+    win_count: number
+    loss_count: number
+    win_rate: number
+    total_pnl: number
+    profit_factor: number
+    avg_holding_days: number
+    max_win: number
+    max_loss: number
+  }
+}
+
+export interface TradingSettings {
+  account_equity: number
+  base_risk_ratio: number
+  reduced_risk_ratio: number
+  consecutive_loss_threshold: number
+  max_single_position_pct: number
+  max_stop_loss_pct: number
+  atr_multiplier: number
+  max_open_chg_pct: number
+  max_holding_days: number
+  take_profit_r1: number
+  take_profit_r15: number
+  take_profit_r2: number
+  trailing_stop_pullback: number
+  peak_equity: number
+}
+
