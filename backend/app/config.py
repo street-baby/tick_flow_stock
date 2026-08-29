@@ -35,8 +35,30 @@ def _user_data_root() -> Path:
         (注意: 卸载时需在 .iss 中豁免 data/, 见 packaging/tickflow.iss 的 [UninstallDelete]。)
     旧版本数据迁移: 见 DataStore._migrate_legacy_data_dir(), 老用户首次启动自动搬迁。
     """
-    # 打包桌面版: exe 同级的 data/ 子目录 (与程序同一总目录, 覆盖安装不丢数据)
+    # 打包桌面版: macOS 用 Application Support, Windows/Linux 用 exe 同级 data/
     if _IS_FROZEN:
+        if sys.platform == "darwin":
+            app_support = Path.home() / "Library" / "Application Support" / "YunZhiXinQuant" / "data"
+            dev_data = Path("/Users/stwenmc/Desktop/漫剧/tickflow-stock-panel/data")
+            if dev_data.exists() and not (app_support / "user_data").exists():
+                try:
+                    import shutil
+                    app_support.parent.mkdir(parents=True, exist_ok=True)
+                    if not app_support.exists():
+                        shutil.copytree(dev_data, app_support)
+                    else:
+                        for item in dev_data.iterdir():
+                            dst = app_support / item.name
+                            if not dst.exists():
+                                if item.is_dir():
+                                    shutil.copytree(item, dst)
+                                else:
+                                    shutil.copy2(item, dst)
+                except Exception:
+                    pass
+            app_support.mkdir(parents=True, exist_ok=True)
+            return app_support
+
         exe_dir = Path(sys.executable).resolve().parent
         return exe_dir / "data"
 
@@ -76,7 +98,7 @@ class Settings(BaseSettings):
     tickflow_api_key: str = Field(default="", description="留空启用 free 模式")
 
     # Zhitu
-    zhitu_api_token: str = Field(default="", description="智兔 API Token 证书")
+    zhitu_api_token: str = Field(default="B9B718D3-3FDD-461B-B4C2-A261A3B01702", description="智兔 API Token 证书")
     zhitu_base_url: str = Field(default="https://api.zhituapi.com", description="智兔 API Base URL")
 
     # AI

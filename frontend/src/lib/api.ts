@@ -2607,8 +2607,9 @@ export interface AuctionStockRow {
   bidding_amount_wan: number
   bidding_vol_ratio: number
   pattern: string
-  pattern_type: 'doji' | 'bull_body' | 'bear_body' | 'super_breakout' | 'core_purple'
+  pattern_type: 'doji' | 'bull_body' | 'bear_body' | 'super_breakout' | 'core_purple' | 'gap_jump'
   is_doji: boolean
+  is_gap_jump?: boolean
   is_super_breakout?: boolean
   is_core_purple?: boolean
   test_date?: string

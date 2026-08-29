@@ -24,11 +24,13 @@ export function AuctionSnatch() {
   const [includeChinext, setIncludeChinext] = useState(true)
   const [includeStar, setIncludeStar] = useState(true)
   const [onlyDoji, setOnlyDoji] = useState(false)
-  const [onlyCorePurple, setOnlyCorePurple] = useState(false)
   const [minMv, setMinMv] = useState(10)
   const [maxMv, setMaxMv] = useState(200)
   const [keyword, setKeyword] = useState('')
   const [previewSymbol, setPreviewSymbol] = useState<string | null>(null)
+
+  const [filterTab, setFilterTab] = useState<'all' | 'gap_jump' | 'core_purple' | 'doji'>('all')
+  const [sortBy, setSortBy] = useState<'score' | 'gap' | 'vol_ratio' | 'amount'>('score')
 
   // AI 高开逻辑分析状态
   const [aiAnalysis, setAiAnalysis] = useState<AuctionAIAnalysisResult | null>(null)
@@ -59,12 +61,23 @@ export function AuctionSnatch() {
     refetchInterval: 15000,
   })
 
-  const rows = (data?.rows || []).filter((r: AuctionStockRow) => {
-    if (onlyCorePurple && !r.is_core_purple) return false
-    if (!keyword) return true
-    const kw = keyword.toLowerCase()
-    return r.name.toLowerCase().includes(kw) || r.symbol.toLowerCase().includes(kw)
-  })
+  const gapJumpCount = (data?.rows || []).filter((r: AuctionStockRow) => r.is_gap_jump).length
+
+  const rows = (data?.rows || [])
+    .filter((r: AuctionStockRow) => {
+      if (filterTab === 'gap_jump' && !r.is_gap_jump) return false
+      if (filterTab === 'core_purple' && !r.is_core_purple) return false
+      if (filterTab === 'doji' && !r.is_doji) return false
+      if (!keyword) return true
+      const kw = keyword.toLowerCase()
+      return r.name.toLowerCase().includes(kw) || r.symbol.toLowerCase().includes(kw)
+    })
+    .sort((a: AuctionStockRow, b: AuctionStockRow) => {
+      if (sortBy === 'gap') return b.open_gap_pct - a.open_gap_pct
+      if (sortBy === 'vol_ratio') return b.bidding_vol_ratio - a.bidding_vol_ratio
+      if (sortBy === 'amount') return b.bidding_amount_wan - a.bidding_amount_wan
+      return (b.score || 0) - (a.score || 0)
+    })
 
   const handleAiAnalyze = async () => {
     if (rows.length === 0) {
@@ -100,181 +113,219 @@ export function AuctionSnatch() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold text-foreground tracking-wide">
-                  9:25 集合竞价抢筹选股
-                </h1>
-                <span className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-[10px] font-semibold text-purple-300 animate-pulse">
-                  💜 核心强势抢筹战法
+                <h1 className="text-lg font-bold text-foreground">9:25 集合竞价抢筹</h1>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                  🚀 跳空高开优先
                 </span>
-                <span className="inline-flex items-center rounded-full border border-border bg-elevated px-2 py-0.5 text-[10px] text-muted">
-                  已剔除北交所/ST/次新股
-                </span>
+                {data?.is_live && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 animate-pulse">
+                    🟢 智兔实时竞价
+                  </span>
+                )}
               </div>
               <p className="text-xs text-muted mt-0.5">
-                定位「试盘蓄势不破底 + 早盘倍量大额抢筹 + 10~200亿弹性市值」主力游资爆拉牛股
+                捕捉早盘主力大单跳空高开、试盘线蓄势突破与强势起爆标的
               </p>
             </div>
           </div>
 
-          {/* 顶栏操作区 */}
-          <div className="flex items-center flex-wrap gap-2.5">
-            {/* 搜索框 */}
+          <div className="flex items-center gap-2.5">
+            {/* 快速搜索框 */}
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
               <input
                 type="text"
-                placeholder="搜索名称 / 代码..."
+                placeholder="搜索名称 / 代码…"
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
-                className="h-8 w-36 md:w-48 pl-8 pr-3 text-xs rounded-lg border border-border bg-elevated/50 text-foreground placeholder:text-muted focus:outline-none focus:border-accent"
+                className="pl-8 pr-3 py-1.5 rounded-lg border border-border bg-elevated/80 text-xs text-foreground placeholder:text-muted focus:outline-none focus:border-accent w-36 md:w-44 transition-all"
               />
             </div>
 
-            {/* 日期选择 */}
-            <div className="flex items-center gap-1.5 bg-elevated/60 px-2.5 py-1 rounded-lg border border-border text-xs text-secondary">
+            {/* AI 高开逻辑分析按钮 */}
+            <button
+              onClick={handleAiAnalyze}
+              disabled={isAnalyzing || rows.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 text-xs font-semibold shadow-[0_0_12px_rgba(168,85,247,0.15)] transition-all cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles className={cn('h-3.5 w-3.5 text-purple-400', isAnalyzing && 'animate-spin')} />
+              <span>{isAnalyzing ? 'AI 解读中…' : 'AI 逻辑分析'}</span>
+            </button>
+
+            {/* 手动刷新 */}
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-elevated hover:bg-elevated/80 text-xs font-medium text-secondary transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin')} />
+              <span>刷新</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 pt-5 space-y-4">
+        {/* 核心快捷形态过滤与排序栏 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface p-3 shadow-sm">
+          {/* 左侧形态 Tab */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-muted mr-1 font-medium">🎯 焦点筛选:</span>
+            {[
+              { id: 'all', label: '🔥 全部竞价标的', count: data?.total || 0 },
+              { id: 'gap_jump', label: '🚀 爆量跳空高开 (置顶推荐)', count: gapJumpCount, highlight: true },
+              { id: 'core_purple', label: '💜 核心强势抢筹', count: stats?.core_purple_count || 0 },
+              { id: 'doji', label: '⭐ 十字星蓄势', count: stats?.doji_count || 0 },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setFilterTab(tab.id as any)}
+                className={cn(
+                  'flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer',
+                  filterTab === tab.id
+                    ? tab.highlight
+                      ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_0_12px_rgba(249,115,22,0.35)]'
+                      : 'bg-accent text-white shadow-sm'
+                    : 'bg-elevated/60 text-secondary hover:text-foreground hover:bg-elevated'
+                )}
+              >
+                <span>{tab.label}</span>
+                <span className="text-[10px] opacity-80 font-mono">({tab.count})</span>
+              </button>
+            ))}
+          </div>
+
+          {/* 右侧排序方式 */}
+          <div className="flex items-center gap-1.5 text-xs text-muted">
+            <span>排序:</span>
+            {[
+              { id: 'score', label: '综合评分' },
+              { id: 'gap', label: '高开幅度' },
+              { id: 'vol_ratio', label: '量比放大' },
+              { id: 'amount', label: '竞价金额' },
+            ].map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSortBy(s.id as any)}
+                className={cn(
+                  'px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer',
+                  sortBy === s.id
+                    ? 'bg-accent/20 text-accent border border-accent/40 font-bold'
+                    : 'bg-elevated text-secondary hover:text-foreground'
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 筛选参数控制条 */}
+        <div className="rounded-xl border border-border bg-surface p-3 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center flex-wrap gap-3">
+            {/* 交易日选择 */}
+            <div className="flex items-center gap-1.5 bg-elevated/70 px-2.5 py-1 rounded-lg border border-border text-secondary">
               <Calendar className="h-3.5 w-3.5 text-muted" />
               <span>交易日:</span>
               <input
                 type="date"
                 value={asOf || data?.as_of || ''}
                 onChange={(e) => setAsOf(e.target.value)}
-                className="bg-transparent text-xs text-foreground focus:outline-none"
+                className="bg-transparent text-foreground focus:outline-none font-mono"
               />
+              {asOf && (
+                <button
+                  onClick={() => setAsOf('')}
+                  className="text-[10px] text-accent hover:underline ml-1 cursor-pointer"
+                >
+                  重置
+                </button>
+              )}
             </div>
 
-            {/* AI 一键分析高开逻辑按钮 */}
-            <button
-              onClick={handleAiAnalyze}
-              disabled={isAnalyzing || rows.length === 0}
-              className="inline-flex items-center justify-center h-8 px-3.5 rounded-lg bg-gradient-to-r from-purple-500 via-orange-500 to-red-500 hover:from-purple-400 hover:to-red-400 text-white text-xs font-bold shadow-md shadow-purple-500/20 transition-all cursor-pointer disabled:opacity-50"
-            >
-              <Sparkles className={cn('h-3.5 w-3.5 mr-1.5', isAnalyzing && 'animate-spin')} />
-              {isAnalyzing ? 'AI 分析高开逻辑中…' : '✨ AI 一键分析高开逻辑'}
-            </button>
-
-            {/* 刷新按钮 */}
-            <button
-              onClick={() => {
-                refetch()
-                toast('竞价数据已刷新', 'success')
-              }}
-              className="inline-flex items-center justify-center h-8 px-3 rounded-lg border border-border bg-surface text-xs font-medium text-secondary hover:text-foreground hover:bg-elevated transition-colors cursor-pointer"
-            >
-              <RefreshCw className={cn('h-3.5 w-3.5 mr-1.5', (isLoading || isFetching) && 'animate-spin')} />
-              刷新
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-6 pt-5 space-y-5">
-        {/* 筛选控制器卡片 */}
-        <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center flex-wrap gap-4 text-xs font-medium text-foreground">
+            {/* 板块多选 */}
+            <div className="flex items-center gap-2">
               <span className="text-muted flex items-center gap-1">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                板块筛选:
+                <SlidersHorizontal className="h-3 w-3" />
+                板块:
               </span>
-
-              {/* 核心紫色抢筹筛选 */}
-              <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={onlyCorePurple}
-                  onChange={(e) => setOnlyCorePurple(e.target.checked)}
-                  className="rounded border-border text-purple-500 focus:ring-purple-500 h-3.5 w-3.5"
-                />
-                <span className="px-2 py-0.5 rounded text-[11px] bg-purple-500/15 text-purple-300 border border-purple-500/35 font-bold shadow-[0_0_8px_rgba(168,85,247,0.2)]">
-                  💜 仅看核心强势抢筹 ({stats?.core_purple_count || 0})
-                </span>
-              </label>
-
-              {/* 创业板勾选 */}
-              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <label className="flex items-center gap-1 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={includeChinext}
                   onChange={(e) => setIncludeChinext(e.target.checked)}
                   className="rounded border-border text-accent focus:ring-accent h-3.5 w-3.5"
                 />
-                <span className="px-1.5 py-0.5 rounded text-[11px] bg-blue-500/10 text-blue-300 border border-blue-500/20">
-                  创业板 (300)
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                  创业板
                 </span>
               </label>
-
-              {/* 科创板勾选 */}
-              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <label className="flex items-center gap-1 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={includeStar}
                   onChange={(e) => setIncludeStar(e.target.checked)}
                   className="rounded border-border text-accent focus:ring-accent h-3.5 w-3.5"
                 />
-                <span className="px-1.5 py-0.5 rounded text-[11px] bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                  科创板 (688)
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                  科创板
                 </span>
               </label>
-
-              {/* 只看十字星 */}
-              <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <label className="flex items-center gap-1 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={onlyDoji}
                   onChange={(e) => setOnlyDoji(e.target.checked)}
                   className="rounded border-border text-amber-400 focus:ring-amber-400 h-3.5 w-3.5"
                 />
-                <span className="px-1.5 py-0.5 rounded text-[11px] bg-amber-500/10 text-amber-300 border border-amber-500/25 font-bold">
-                  ⭐ 仅看十字星蓄势
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                  ⭐ 仅十字星
                 </span>
               </label>
             </div>
+          </div>
 
-            {/* 参数微调快捷栏 */}
-            <div className="flex items-center flex-wrap gap-4 text-xs text-secondary">
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted">高开幅度:</span>
-                {[1.0, 1.5, 2.0, 3.0].map((gap) => (
-                  <button
-                    key={gap}
-                    onClick={() => setMinGapPct(gap)}
-                    className={cn(
-                      'px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors cursor-pointer',
-                      minGapPct === gap
-                        ? 'bg-accent text-white font-bold'
-                        : 'bg-elevated text-secondary hover:text-foreground'
-                    )}
-                  >
-                    &gt;={gap}%
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <span className="text-muted">市值范围:</span>
-                {[
-                  { label: '10~200亿', min: 10, max: 200 },
-                  { label: '10~50亿', min: 10, max: 50 },
-                  { label: '10~100亿', min: 10, max: 100 },
-                  { label: '50~300亿', min: 50, max: 300 },
-                ].map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => {
-                      setMinMv(item.min)
-                      setMaxMv(item.max)
-                    }}
-                    className={cn(
-                      'px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors cursor-pointer',
-                      minMv === item.min && maxMv === item.max
-                        ? 'bg-accent text-white font-bold'
-                        : 'bg-elevated text-secondary hover:text-foreground'
-                    )}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+          <div className="flex items-center flex-wrap gap-3">
+            <div className="flex items-center gap-1">
+              <span className="text-muted">高开:</span>
+              {[1.0, 1.5, 2.0, 3.0].map((gap) => (
+                <button
+                  key={gap}
+                  onClick={() => setMinGapPct(gap)}
+                  className={cn(
+                    'px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer',
+                    minGapPct === gap
+                      ? 'bg-accent text-white font-bold'
+                      : 'bg-elevated text-secondary hover:text-foreground'
+                  )}
+                >
+                  &ge;{gap}%
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-muted">市值:</span>
+              {[
+                { label: '10~200亿', min: 10, max: 200 },
+                { label: '10~50亿', min: 10, max: 50 },
+                { label: '10~100亿', min: 10, max: 100 },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => {
+                    setMinMv(item.min)
+                    setMaxMv(item.max)
+                  }}
+                  className={cn(
+                    'px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer',
+                    minMv === item.min && maxMv === item.max
+                      ? 'bg-accent text-white font-bold'
+                      : 'bg-elevated text-secondary hover:text-foreground'
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -294,9 +345,21 @@ export function AuctionSnatch() {
               </div>
             </div>
 
+            <div className="p-4 rounded-xl border border-orange-500/40 bg-orange-500/[0.08] flex items-center gap-3 shadow-[0_0_15px_rgba(249,115,22,0.12)]">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/20 text-orange-300 border border-orange-500/40 shadow-[0_0_10px_rgba(249,115,22,0.25)]">
+                <Zap className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-[11px] text-orange-300/90 font-bold">🚀 爆量跳空高开</div>
+                <div className="text-xl font-bold font-mono text-orange-200">
+                  {gapJumpCount} <span className="text-xs font-normal text-muted">只</span>
+                </div>
+              </div>
+            </div>
+
             <div className="p-4 rounded-xl border border-purple-500/30 bg-purple-500/[0.06] flex items-center gap-3 shadow-[0_0_15px_rgba(168,85,247,0.1)]">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.2)]">
-                <Zap className="h-5 w-5" />
+                <Sparkles className="h-5 w-5" />
               </div>
               <div>
                 <div className="text-[11px] text-purple-300/80 font-medium">💜 核心强势抢筹</div>
@@ -413,6 +476,8 @@ export function AuctionSnatch() {
                         'hover:bg-elevated/40 transition-colors group cursor-pointer border-l-2',
                         row.is_core_purple
                           ? 'border-l-purple-500 bg-purple-500/[0.07] hover:bg-purple-500/[0.12]'
+                          : row.is_gap_jump
+                          ? 'border-l-orange-500 bg-orange-500/[0.07] hover:bg-orange-500/[0.12]'
                           : row.is_super_breakout
                           ? 'border-l-amber-400 bg-amber-500/[0.05]'
                           : 'border-l-transparent'
@@ -427,7 +492,7 @@ export function AuctionSnatch() {
                         <div className="flex items-center gap-2">
                           <span className={cn(
                             "font-bold transition-colors",
-                            row.is_core_purple ? "text-purple-200 group-hover:text-purple-300" : "text-foreground group-hover:text-accent"
+                            row.is_core_purple ? "text-purple-200 group-hover:text-purple-300" : row.is_gap_jump ? "text-orange-200 group-hover:text-orange-300" : "text-foreground group-hover:text-accent"
                           )}>
                             {row.name}
                           </span>
@@ -439,7 +504,12 @@ export function AuctionSnatch() {
                               💜 核心强势抢筹
                             </span>
                           )}
-                          {!row.is_core_purple && row.is_super_breakout && (
+                          {!row.is_core_purple && row.is_gap_jump && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-gradient-to-r from-orange-500/30 to-red-500/30 text-orange-200 border border-orange-500/50 shadow-[0_0_8px_rgba(249,115,22,0.3)]">
+                              🚀 爆量跳空抢筹
+                            </span>
+                          )}
+                          {!row.is_core_purple && !row.is_gap_jump && row.is_super_breakout && (
                             <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                               👑 涨停爆发基因
                             </span>
@@ -501,10 +571,12 @@ export function AuctionSnatch() {
                             'px-2 py-0.5 rounded-md text-[11px] font-bold inline-flex items-center gap-1',
                             row.is_core_purple
                               ? 'bg-gradient-to-r from-purple-500/25 to-fuchsia-500/25 text-purple-200 border border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.3)] font-extrabold'
+                              : row.is_gap_jump
+                              ? 'bg-gradient-to-r from-orange-500/25 to-red-500/25 text-orange-200 border border-orange-500/50 shadow-[0_0_12px_rgba(249,115,22,0.25)] font-extrabold'
                               : row.is_super_breakout
                               ? 'bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-red-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.2)] font-extrabold'
                               : row.is_doji
-                              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                              ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
                               : row.pattern_type === 'bull_body'
                               ? 'bg-red-500/10 text-red-300 border border-red-500/20'
                               : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'

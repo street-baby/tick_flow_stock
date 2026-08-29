@@ -317,17 +317,30 @@ class AuctionService:
                 and (amount_wan >= 1000.0 or (total_mv <= 80.0 and amount_wan >= 600.0))
             )
 
+            # 🚀 跳空高开抢筹识别（高开 >= 3.0%，爆量，前日小实体/十字星蓄势）
+            is_gap_jump = (
+                (gap_pct >= 3.0)
+                and (body_pct <= 2.2)
+                and (vol_ratio >= 1.8 or amount_wan >= 800.0)
+            )
+
             # 👑 顶级涨停起爆形态判定
             is_super_breakout = (
                 is_doji
-                and (2.0 <= gap_pct <= 4.8)
-                and (vol_ratio >= 3.0 or amount_wan >= 2000.0)
-                and (prev_amp <= 3.5)
+                and (2.0 <= gap_pct <= 7.5)
+                and (vol_ratio >= 2.2 or amount_wan >= 1200.0)
+                and (prev_amp <= 4.0)
             )
 
             if is_core_purple:
                 pattern = "💜 核心强势抢筹"
                 pattern_type = "core_purple"
+            elif is_gap_jump and (gap_pct >= 4.0 or vol_ratio >= 3.0):
+                pattern = "🚀 爆量跳空起爆"
+                pattern_type = "gap_jump"
+            elif is_gap_jump:
+                pattern = "🚀 跳空高开抢筹"
+                pattern_type = "gap_jump"
             elif is_super_breakout:
                 pattern = "👑 爆量起爆十字星"
                 pattern_type = "super_breakout"
@@ -342,28 +355,30 @@ class AuctionService:
                 pattern_type = "bear_body"
 
             # 抢筹评分（0~100）
-            # 1. 适度高开 2.0%~4.5% 黄金起爆得分最高 (40分)
-            if 2.0 <= gap_pct <= 4.5:
+            # 1. 黄金跳空高开 3.0%~6.5% 最具进攻性，得分最高 (40分)
+            if 3.0 <= gap_pct <= 6.5:
                 gap_score = 40.0
-            elif 1.5 <= gap_pct < 2.0 or 4.5 < gap_pct <= 6.0:
-                gap_score = 35.0
-            elif 6.0 < gap_pct <= 8.5:
-                gap_score = 25.0
+            elif 2.0 <= gap_pct < 3.0 or 6.5 < gap_pct <= 8.5:
+                gap_score = 36.0
+            elif 1.5 <= gap_pct < 2.0:
+                gap_score = 30.0
             else:
-                gap_score = 15.0
+                gap_score = 20.0
 
             # 2. 十字星/实体紧凑程度 (35分)
             shape_score = max(0.0, 35.0 - body_pct * 12.0)
 
             # 3. 竞价金额与量比 (25分)
-            amount_score = min(25.0, (vol_ratio / 5.0) * 15.0 + (amount_wan / 500.0) * 10.0)
+            amount_score = min(25.0, (vol_ratio / 4.0) * 15.0 + (amount_wan / 500.0) * 10.0)
 
-            # 超级起爆形态与核心紫色形态额外加分
+            # 超级起爆形态、跳空抢筹与核心紫色形态额外加分
             boost = 0.0
             if is_core_purple:
-                boost += 20.0
-            if is_super_breakout:
-                boost += 10.0
+                boost += 25.0
+            if is_gap_jump:
+                boost += 22.0
+            elif is_super_breakout:
+                boost += 16.0
 
             total_score = min(100.0, round(gap_score + shape_score + amount_score + boost, 1))
 
@@ -383,6 +398,7 @@ class AuctionService:
                 "pattern": pattern,
                 "pattern_type": pattern_type,
                 "is_doji": is_doji,
+                "is_gap_jump": is_gap_jump,
                 "is_super_breakout": is_super_breakout,
                 "is_core_purple": is_core_purple,
                 "test_date": test_info.get("test_date"),
@@ -391,8 +407,17 @@ class AuctionService:
                 "score": total_score,
             })
 
-        # 按抢筹评分降序排序
-        rows.sort(key=lambda x: (x.get("is_core_purple", False), x["score"]), reverse=True)
+        # 按优先抢筹形态（核心抢筹 / 跳空高开 / 爆量起爆）与评分降序排序，跳空高开优先置顶
+        rows.sort(
+            key=lambda x: (
+                x.get("is_core_purple", False) or x.get("is_gap_jump", False) or x.get("is_super_breakout", False),
+                x.get("is_gap_jump", False),
+                x["score"],
+                x.get("bidding_vol_ratio", 0.0),
+                x.get("open_gap_pct", 0.0),
+            ),
+            reverse=True,
+        )
 
         elapsed_ms = round((time.perf_counter() - t0_start) * 1000, 1)
 

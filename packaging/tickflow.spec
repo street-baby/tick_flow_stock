@@ -32,6 +32,7 @@ ROOT = Path(SPECPATH).parent
 FRONTEND_DIST = str(ROOT / "frontend" / "dist")
 TIERS_YAML = str(ROOT / "tiers.yaml")
 BUILTIN_STRATEGIES = str(ROOT / "backend" / "app" / "strategy" / "builtin")
+BUILTIN_PLUGINS = str(ROOT / "backend" / "app" / "plugins")
 # 图标按平台选: Windows 用 .ico, macOS 用 .icns (PyInstaller 对 .ico 在
 # mac 上静默忽略, 不换格式 Dock/Finder 会显示通用图标)。两者都由
 # packaging/generate_icon.py 一并生成。
@@ -48,6 +49,16 @@ for pkg in ("polars", "pyarrow", "duckdb", "fastexcel"):
     datas += d
     binaries += b
     hiddenimports += h
+
+# 收集内置插件子模块
+hiddenimports += [
+    "app.plugins.zhitu",
+    "app.plugins.zhitu.provider",
+    "app.plugins.zhitu.client",
+    "app.plugins.stocksdk",
+    "app.plugins.stocksdk.provider",
+    "app.plugins.stocksdk.bridge",
+]
 
 # Polars 的发行包名为 polars-runtime-32 / polars-runtime-compat, 但实际
 # Python 导入包带前导下划线。release.yml 安装 legacy-cpu 后必须收集二者，
@@ -115,6 +126,8 @@ datas += [(FRONTEND_DIST, "static")]
 datas += [(TIERS_YAML, ".")]
 # 内置策略 → app/strategy/builtin/ (importlib 动态加载, 不能进 PYZ)
 datas += [(BUILTIN_STRATEGIES, "app/strategy/builtin")]
+# 内置插件 → app/plugins/ (含 zhitu 等)
+datas += [(BUILTIN_PLUGINS, "app/plugins")]
 
 # ── 排除不需要的重型依赖 (主包不含 vectorbt 回测链) ──────────────────
 excludes = [
@@ -200,13 +213,13 @@ if _IS_MACOS:
 
     app = BUNDLE(
         coll,
-        name="TickFlowStockPanel.app",
+        name="云之心量化.app",
         icon=APP_ICON,
-        bundle_identifier="com.tickflow.stockpanel",
+        bundle_identifier="com.yunzhixin.quant",
         version=APP_VERSION,   # → CFBundleShortVersionString / CFBundleVersion
         info_plist={
-            "CFBundleName": "TickFlow Stock Panel",
-            "CFBundleDisplayName": "TickFlow 股票面板",
+            "CFBundleName": "云之心量化",
+            "CFBundleDisplayName": "云之心量化",
             "CFBundleVersion": APP_VERSION,
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "10.13",

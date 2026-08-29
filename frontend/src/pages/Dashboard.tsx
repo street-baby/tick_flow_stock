@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Activity, ArrowDownRight, ArrowUpRight, BarChart3, BellRing, Database, Flame, Gauge, Info, LineChart, Loader2, Play, RefreshCw, Sparkles, Target, Timer } from 'lucide-react'
+import { Activity, ArrowDownRight, ArrowUpRight, BarChart3, BellRing, Database, Flame, Gauge, Info, LineChart, Loader2, Play, RefreshCw, Sparkles, Target, Timer, Zap } from 'lucide-react'
 import { DatePicker } from '@/components/DatePicker'
 import { api, type MarketSnapshotRow, type OverviewDimensionRankItem, type OverviewMarket, type AlertEvent } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
@@ -547,6 +547,12 @@ export function Dashboard() {
   const [showWelcomeModal, setShowWelcomeModal] = useState(false)
   const dataStatus = useDataStatus({ staleTime: 60_000 })
   const { market } = useMarket()
+
+  // 切换市场 (A股 / 港股 / 美股) 时，重置已选日期，自动回退到目标市场的最新日期
+  useEffect(() => {
+    setSelectedDate(undefined)
+  }, [market])
+
   const overview = useQuery({
     queryKey: QK.overviewMarket(selectedDate, market),
     queryFn: () => api.overviewMarket(selectedDate, market),
@@ -564,9 +570,17 @@ export function Dashboard() {
     refetchInterval: 3_000,
   })
 
+  // 9:25 早盘竞价抢筹精选（跳空高开优先）
+  const auctionQuery = useQuery({
+    queryKey: ['dashboard-auction-snatch', selectedDate],
+    queryFn: () => api.auctionScreen({ as_of: selectedDate || undefined, min_gap_pct: 2.0 }),
+    enabled: isCn,
+    staleTime: 15_000,
+  })
+
   const displayIndices = useMemo(() => {
     const base = data?.indices ?? []
-    if (!liveIndexQuotes.data?.rows?.length) return base
+    if (!isCn || !liveIndexQuotes.data?.rows?.length) return base
     const liveMap = new Map(liveIndexQuotes.data.rows.map(r => [r.symbol, r]))
     return base.map(item => {
       const live = liveMap.get(item.symbol)
@@ -578,7 +592,7 @@ export function Dashboard() {
         change_amount: live.change_amount ?? item.change_amount,
       }
     })
-  }, [data?.indices, liveIndexQuotes.data])
+  }, [data?.indices, liveIndexQuotes.data, isCn])
   const caps = useCapabilities()
   const settings = useSettings()
   const hasDepth = !!caps.data?.capabilities?.['depth5.batch']
@@ -679,9 +693,9 @@ export function Dashboard() {
   const score = data.emotion?.score ?? 50
   const strongUp = data.breadth.strong_up ?? 0
   const strongDown = data.breadth.strong_down ?? 0
-  const latestDate = dataStatus.data?.enriched?.latest_date ?? null
+  const latestDate = isCn ? (dataStatus.data?.enriched?.latest_date ?? null) : (data?.as_of ?? null)
   const currentDate = selectedDate ?? data.as_of ?? ''
-  const quoteRunning = (!selectedDate || selectedDate === latestDate) && data.quote_status?.running
+  const quoteRunning = isCn && (!selectedDate || selectedDate === latestDate) && data.quote_status?.running
   // 实时模式: none / watchlist / full_market。
   // watchlist (Free 档) 仅自选 ≤5 只实时, 看板呈现的大盘数据实为盘后快照, 需提示避免误读。
   const quoteMode = data.quote_status?.mode as ('none' | 'watchlist' | 'full_market') | undefined
@@ -734,7 +748,7 @@ export function Dashboard() {
             <DatePicker
               value={currentDate}
               onChange={setSelectedDate}
-              min={dataStatus.data?.enriched?.earliest_date ?? undefined}
+              min={isCn ? (dataStatus.data?.enriched?.earliest_date ?? undefined) : undefined}
               max={latestDate ?? undefined}
               className="w-32"
             />
@@ -742,7 +756,7 @@ export function Dashboard() {
             <span className="font-mono text-secondary">—</span>
           )}
           <span className="flex items-center gap-1"><Timer className="h-3 w-3" />{quoteAge(data.quote_status?.quote_age_ms)}</span>
-          <span className={quoteRunning ? 'text-accent' : 'text-warning'}>{quoteRunning ? '实时' : '非实时'}</span>
+          <span className={quoteRunning ? 'text-accent' : 'text-warning'}>{quoteRunning ? '实时' : '盘后快照'}</span>
           <button
             onClick={handleRefresh}
             disabled={manualFetching}
@@ -754,7 +768,7 @@ export function Dashboard() {
       </div>
 
       {/* Free 档提示: 大盘看板为盘后数据, 仅自选股实时。避免用户误读为全市场实时。 */}
-      {quoteMode === 'watchlist' && (
+      {isCn && quoteMode === 'watchlist' && (
         <div className="mb-1.5 flex items-start gap-2 rounded-card border border-amber-500/30 bg-amber-500/8 px-3 py-1.5 text-[11px] leading-relaxed">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
           <div className="min-w-0 flex-1 text-secondary">
@@ -785,31 +799,111 @@ export function Dashboard() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 text-xs">
           <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
-            <span className="text-muted text-[11px] shrink-0">🎯 领涨主线:</span>
+            <span className="text-muted text-[11px] shrink-0">{isCn ? '🎯 领涨主线:' : '🎯 市场偏向:'}</span>
             <span className="font-semibold text-bull truncate">
-              {data.concept_rank?.leading?.[0]?.name ? `${data.concept_rank.leading[0].name} (${fmtStockPct(data.concept_rank.leading[0].avg_pct)})` : '光通信/算力芯片'}
+              {isCn
+                ? (data.concept_rank?.leading?.[0]?.name ? `${data.concept_rank.leading[0].name} (${fmtStockPct(data.concept_rank.leading[0].avg_pct)})` : '光通信/算力芯片')
+                : (data.breadth.up >= data.breadth.down ? `多头占优 (上涨率 ${data.breadth.up_pct.toFixed(1)}%)` : `空头承压 (下跌率 ${data.breadth.down_pct.toFixed(1)}%)`)}
             </span>
           </div>
           <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
-            <span className="text-muted text-[11px] shrink-0">⚠️ 领跌风险:</span>
+            <span className="text-muted text-[11px] shrink-0">{isCn ? '⚠️ 领跌风险:' : '⚡ 动量新高:'}</span>
             <span className="font-semibold text-bear truncate">
-              {data.concept_rank?.lagging?.[0]?.name ? `${data.concept_rank.lagging[0].name} (${fmtStockPct(data.concept_rank.lagging[0].avg_pct)})` : '医药生物/农林牧渔'}
+              {isCn
+                ? (data.concept_rank?.lagging?.[0]?.name ? `${data.concept_rank.lagging[0].name} (${fmtStockPct(data.concept_rank.lagging[0].avg_pct)})` : '医药生物/农林牧渔')
+                : <span className="text-bull font-mono">{data.limit?.limit_up ?? 0} 只创60日新高</span>}
             </span>
           </div>
           <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
-            <span className="text-muted text-[11px] shrink-0">🔥 最高连板:</span>
+            <span className="text-muted text-[11px] shrink-0">{isCn ? '🔥 最高连板:' : '🌐 覆盖标的:'}</span>
             <span className="font-mono font-bold text-amber-400 truncate">
-              {data.limit?.max_boards ? `${data.limit.max_boards} 连板` : '—'}
+              {isCn ? (data.limit?.max_boards ? `${data.limit.max_boards} 连板` : '—') : `${data.breadth.total} 只 ${market.toUpperCase()}`}
             </span>
           </div>
           <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
             <span className="text-muted text-[11px] shrink-0">📡 涨跌广度:</span>
             <span className="font-mono text-muted truncate">
-              <span className="text-bull font-semibold">{data.breadth.up} 涨</span> / <span className="text-bear font-semibold">{data.breadth.down} 跌</span> (涨停{data.limit?.limit_up ?? 0}家)
+              <span className="text-bull font-semibold">{data.breadth.up} 涨</span> / <span className="text-bear font-semibold">{data.breadth.down} 跌</span> {isCn && `(涨停${data.limit?.limit_up ?? 0}家)`}
             </span>
           </div>
         </div>
       </div>
+
+      {/* 🚀 9:25 早盘竞价抢筹·跳空起爆精选栏 (高开突破置顶，早盘重点盯盘) */}
+      {isCn && (auctionQuery.data?.rows?.length ?? 0) > 0 && (
+        <div className="mb-2 rounded-xl border border-orange-500/35 bg-gradient-to-r from-orange-500/15 via-surface/90 to-purple-950/20 p-2.5 backdrop-blur-md shadow-sm">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+            <div className="flex items-center gap-2">
+              <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500/30 to-red-500/30 text-orange-300 border border-orange-500/40 shadow-[0_0_8px_rgba(249,115,22,0.3)]">
+                <Zap className="h-3 w-3 animate-pulse text-orange-400" />
+              </span>
+              <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                <span>9:25 早盘竞价抢筹 · 跳空起爆精选</span>
+                <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-orange-500/25 text-orange-300 border border-orange-500/40">
+                  {auctionQuery.data?.rows.filter(r => r.is_gap_jump || r.is_core_purple).length ?? 0} 只主力异动跳空
+                </span>
+              </span>
+            </div>
+            <Link
+              to="/auction-snatch"
+              className="text-[11px] text-accent hover:text-accent/80 flex items-center gap-1 font-medium group"
+            >
+              <span>查看全部竞价抢筹 ({auctionQuery.data?.total || 0}只)</span>
+              <ArrowUpRight className="h-3 w-3 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-2">
+            {(auctionQuery.data?.rows || []).slice(0, 5).map((stock) => (
+              <div
+                key={stock.symbol}
+                onClick={() => setPreviewStock({ symbol: stock.symbol, name: stock.name })}
+                className={cn(
+                  "p-2 rounded-lg border bg-surface/80 hover:bg-surface transition-all cursor-pointer group shadow-sm flex flex-col justify-between hover:scale-[1.01]",
+                  stock.is_core_purple
+                    ? "border-purple-500/50 hover:border-purple-500/80 bg-purple-500/[0.06]"
+                    : stock.is_gap_jump
+                    ? "border-orange-500/50 hover:border-orange-500/80 bg-orange-500/[0.06]"
+                    : "border-border hover:border-accent/40"
+                )}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={cn(
+                      "text-xs font-bold truncate transition-colors",
+                      stock.is_gap_jump ? "text-orange-200 group-hover:text-orange-300" : stock.is_core_purple ? "text-purple-200 group-hover:text-purple-300" : "text-foreground group-hover:text-accent"
+                    )}>
+                      {stock.name}
+                    </span>
+                    <span className="font-mono text-[10px] text-muted shrink-0">
+                      {stock.symbol.slice(0, 6)}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-red-400 shrink-0">
+                    +{stock.open_gap_pct.toFixed(2)}%
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-1 mt-1.5 text-[10px]">
+                  <span className={cn(
+                    "px-1.5 py-0.2 rounded font-bold",
+                    stock.is_core_purple
+                      ? "bg-purple-500/20 text-purple-200 border border-purple-500/35"
+                      : stock.is_gap_jump
+                      ? "bg-gradient-to-r from-orange-500/25 to-red-500/25 text-orange-200 border border-orange-500/40 font-extrabold"
+                      : "bg-elevated text-secondary"
+                  )}>
+                    {stock.is_core_purple ? "💜 核心抢筹" : stock.is_gap_jump ? "🚀 爆量跳空" : stock.pattern}
+                  </span>
+                  <span className="font-mono text-muted">
+                    量比 {stock.bidding_vol_ratio >= 10 ? (stock.bidding_vol_ratio / 100).toFixed(1) : stock.bidding_vol_ratio.toFixed(1)}x
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mb-1.5 grid grid-cols-4 gap-1">
         {displayIndices.map(item => <IndexTicker key={item.symbol} item={item} />)}
@@ -818,15 +912,15 @@ export function Dashboard() {
       <div className="mb-1.5 grid grid-cols-6 gap-1">
         <KpiCell label="个股涨 / 平 / 跌" value={<><span className="text-bull">{data.breadth.up}</span><span className="text-muted">/</span><span className="text-muted">{data.breadth.flat}</span><span className="text-muted">/</span><span className="text-bear">{data.breadth.down}</span></>} sub={`上涨率 ${data.breadth.up_pct.toFixed(1)}%`} />
         <KpiCell label="强势 / 弱势" value={<><span className="text-bull">{strongUp}</span><span className="text-muted">/</span><span className="text-bear">{strongDown}</span></>} sub="涨跌 ≥3%" />
-        <KpiCell label={<span className="inline-flex items-center gap-1">涨停 / 跌停<SealedBadge degraded={isSealedDegrade} hasDepth={hasDepth} isHistorical={false} sealedReady={sealedReady} sealedCountsUp={{ real: data.limit.limit_up, fake: data.limit.fake_up ?? 0, pending: 0 }} sealedCountsDown={{ real: data.limit.limit_down, fake: data.limit.fake_down ?? 0, pending: 0 }} rawUp={data.limit.limit_up + (data.limit.fake_up ?? 0)} rawDown={data.limit.limit_down + (data.limit.fake_down ?? 0)} invalidateKeys={['overview-market', 'limit-ladder']} /></span>} value={<><span className="text-bull">{data.limit.limit_up}</span><span className="text-muted">/</span><span className="text-bear">{data.limit.limit_down}</span></>} sub={`封板率 ${(data.limit.seal_rate ?? 0).toFixed(0)}%`} />
-        <KpiCell label="最高连板" value={`${data.limit.max_boards || 0}板`} sub={(() => {
+        <KpiCell label={isCn ? <span className="inline-flex items-center gap-1">涨停 / 跌停<SealedBadge degraded={isSealedDegrade} hasDepth={hasDepth} isHistorical={false} sealedReady={sealedReady} sealedCountsUp={{ real: data.limit.limit_up, fake: data.limit.fake_up ?? 0, pending: 0 }} sealedCountsDown={{ real: data.limit.limit_down, fake: data.limit.fake_down ?? 0, pending: 0 }} rawUp={data.limit.limit_up + (data.limit.fake_up ?? 0)} rawDown={data.limit.limit_down + (data.limit.fake_down ?? 0)} invalidateKeys={['overview-market', 'limit-ladder']} /></span> : "60日新高 / 新低"} value={<><span className="text-bull">{data.limit.limit_up}</span><span className="text-muted">/</span><span className="text-bear">{data.limit.limit_down}</span></>} sub={isCn ? `封板率 ${(data.limit.seal_rate ?? 0).toFixed(0)}%` : `新高占比 ${(data.breadth.total ? (data.limit.limit_up / data.breadth.total * 100).toFixed(1) : 0)}%`} />
+        <KpiCell label={isCn ? "最高连板" : "市场标的"} value={isCn ? `${data.limit.max_boards || 0}板` : `${data.breadth.total} 只`} sub={isCn ? (() => {
           const top = data.limit.tiers.find(t => t.boards === data.limit.max_boards)
           const stocks = top?.stocks ?? []
           if (stocks.length > 0 && stocks.length <= 3) return stocks.map(s => s.name || s.symbol).join(' · ')
           return `梯队 ${data.limit.tiers.length}`
-        })()} tone="accent" />
-        <KpiCell label="成交额" value={fmtBigNum(data.amount.total)} sub={`均额 ${fmtBigNum(data.amount.avg)}`} />
-        <KpiCell label="换手 / 量比" value={`${fmtPrice(data.activity.avg_turnover, 1)}% / ${fmtPrice(data.activity.vol_ratio, 2)}`} sub={`高换手 ${data.activity.high_turnover} · 放量占比 ${fmtPrice(data.activity.high_vol_ratio, 1)}%`} tone="accent" />
+        })() : `${market.toUpperCase()} 市场覆盖`} tone="accent" />
+        <KpiCell label="成交额" value={data.amount.total > 0 ? fmtBigNum(data.amount.total) : '—'} sub={data.amount.total > 0 ? `均额 ${fmtBigNum(data.amount.avg)}` : '日K量价同步'} />
+        <KpiCell label={isCn ? "换手 / 量比" : "5日量比"} value={isCn ? `${fmtPrice(data.activity.avg_turnover, 1)}% / ${fmtPrice(data.activity.vol_ratio, 2)}` : `${fmtPrice(data.activity.vol_ratio, 2)}`} sub={isCn ? `高换手 ${data.activity.high_turnover} · 放量占比 ${fmtPrice(data.activity.high_vol_ratio, 1)}%` : `放量占比 ${fmtPrice(data.activity.high_vol_ratio, 1)}%`} tone="accent" />
       </div>
 
       <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-[minmax(0,1fr)_20rem]">
@@ -867,11 +961,11 @@ export function Dashboard() {
               <div className="mt-1.5 border-t border-border pt-1.5">
                 <SectionTitle icon={Target} title="实用监控" hint="盘中观察" />
                 <div className="grid grid-cols-3 gap-1.5">
-                  <MiniMetric label="炸板" value={`${data.limit.broken ?? 0}`} cls="text-warning" />
-                  <MiniMetric label="跌停" value={`${data.limit.limit_down ?? 0}`} cls="text-bear" />
+                  <MiniMetric label={isCn ? "炸板" : "60日新高"} value={isCn ? `${data.limit.broken ?? 0}` : `${data.trend.new_high}`} cls={isCn ? "text-warning" : "text-bull"} />
+                  <MiniMetric label={isCn ? "跌停" : "60日新低"} value={isCn ? `${data.limit.limit_down ?? 0}` : `${data.trend.new_low}`} cls="text-bear" />
                   <MiniMetric label="站上MA60" value={`${data.trend.above_ma60_pct.toFixed(0)}%`} cls="text-accent" />
                   <MiniMetric label="新高/新低" value={`${compactCount(data.trend.new_high)}/${compactCount(data.trend.new_low)}`} cls={data.trend.new_high >= data.trend.new_low ? 'text-bull' : 'text-bear'} />
-                  <MiniMetric label="高换手数" value={`${data.activity.high_turnover}`} cls="text-accent" />
+                  <MiniMetric label={isCn ? "高换手数" : "放量标的"} value={`${isCn ? data.activity.high_turnover : data.trend.new_high}`} cls="text-accent" />
                   <MiniMetric label="放量占比" value={`${fmtPrice(data.activity.high_vol_ratio, 1)}%`} cls="text-accent" />
                 </div>
               </div>
@@ -893,8 +987,24 @@ export function Dashboard() {
 
         <aside className="min-w-0 space-y-1.5">
           <section className="rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
-            <SectionTitle icon={Flame} title="涨停梯队" hint={<span className="inline-flex items-center gap-1">{`涨停 ${data.limit.limit_up}`}{isSealedDegrade && <span className="text-[9px] px-1 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-500">{hasDepth ? '未修正' : '降级'}</span>}</span>} />
-            <LadderMini limit={data.limit} />
+            <SectionTitle icon={Flame} title={isCn ? "涨停梯队" : "动量梯队"} hint={isCn ? <span className="inline-flex items-center gap-1">{`涨停 ${data.limit.limit_up}`}{isSealedDegrade && <span className="text-[9px] px-1 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-500">{hasDepth ? '未修正' : '降级'}</span>}</span> : `60日新高 ${data.limit.limit_up}只`} />
+            {isCn ? (
+              <LadderMini limit={data.limit} />
+            ) : (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between rounded bg-elevated/55 px-2 py-1.5 text-[11px]">
+                  <span className="text-muted">60日新高突破</span>
+                  <span className="font-mono text-bull font-semibold">{data.limit.limit_up} 只</span>
+                </div>
+                <div className="flex items-center justify-between rounded bg-elevated/55 px-2 py-1.5 text-[11px]">
+                  <span className="text-muted">60日新低破位</span>
+                  <span className="font-mono text-bear font-semibold">{data.limit.limit_down} 只</span>
+                </div>
+                <div className="rounded border border-border/40 bg-surface/50 p-2 text-[11px] text-muted leading-relaxed">
+                  美股不设涨跌停限制，系统以 60 日动量新高/新低作为强弱梯队观察指标。
+                </div>
+              </div>
+            )}
           </section>
           <section className="rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
             <div className="mb-2 flex items-center justify-between gap-2">

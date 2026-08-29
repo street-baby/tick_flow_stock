@@ -364,7 +364,7 @@ def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 5, level: in
 # Top 行 / 涨跌幅分桶
 # ================================================================
 
-def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8) -> list[dict]:
+def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8, board_label: str | None = None) -> list[dict]:
     filtered = [r for r in rows if _finite(r.get(key)) is not None]
     filtered.sort(key=lambda r: _finite(r.get(key)) or 0, reverse=descending)
     return [
@@ -375,7 +375,7 @@ def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8) -> l
             "change_pct": _finite(r.get("change_pct")),
             "amount": _finite(r.get("amount")),
             "turnover_rate": _finite(r.get("turnover_rate")),
-            "board": _board(str(r.get("symbol") or "")),
+            "board": board_label or _board(str(r.get("symbol") or "")),
         }
         for r in filtered[:limit]
     ]
@@ -675,7 +675,9 @@ def build_market_overview_market(
 
     meta = get_market(market)
     svc = ScreenerService(repo, market=market)
-    as_of = as_of or svc.latest_date()
+    latest_avail = svc.latest_date()
+    if as_of is None or (latest_avail and as_of > latest_avail):
+        as_of = latest_avail
 
     idx_quotes = get_market_index_quotes(market, repo.store.data_dir) if repo else []
 
@@ -697,6 +699,10 @@ def build_market_overview_market(
         return empty
 
     df = svc._load_enriched_for_date(as_of)
+    if df.is_empty() and latest_avail and as_of != latest_avail:
+        as_of = latest_avail
+        df = svc._load_enriched_for_date(as_of)
+
     if df.is_empty():
         return empty
 
@@ -776,10 +782,10 @@ def build_market_overview_market(
         "activity": {"avg_turnover": 0, "high_turnover": 0, "high_vol_ratio": high_vol_pct, "vol_ratio": avg_vol_ratio},
         "radar": radar,
         "emotion": {"score": emotion_score, "label": emotion_label},
-        "top_gainers": _top_rows(rows, "change_pct", True),
-        "top_losers": _top_rows(rows, "change_pct", False),
-        "turnover_leaders": _top_rows(rows, "amount", True),
-        "active_leaders": _top_rows(rows, "vol_ratio_5d", True),
+        "top_gainers": _top_rows(rows, "change_pct", True, board_label=meta.label),
+        "top_losers": _top_rows(rows, "change_pct", False, board_label=meta.label),
+        "turnover_leaders": _top_rows(rows, "amount", True, board_label=meta.label),
+        "active_leaders": _top_rows(rows, "vol_ratio_5d", True, board_label=meta.label),
         "concept_rank": {"leading": [], "lagging": []},
         "industry_rank": {"leading": [], "lagging": []},
         "market": market,

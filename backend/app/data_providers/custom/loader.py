@@ -35,6 +35,13 @@ _NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 def plugins_dir() -> Path:
     """内置可选插件目录 (app/plugins/, 与现有包结构一致, 开发态/容器态路径统一)。"""
+    import sys
+    if getattr(sys, "frozen", False):
+        res = getattr(sys, "_MEIPASS", None)
+        if res:
+            p = Path(res) / "app" / "plugins"
+            if p.exists():
+                return p
     return Path(__file__).resolve().parents[2] / "plugins"
 
 
