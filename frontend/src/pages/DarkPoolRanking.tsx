@@ -57,15 +57,15 @@ export function DarkPoolRanking() {
       <div className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur-md px-6 py-4">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500/20 via-pink-500/20 to-red-500/20 border border-purple-500/30 text-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.2)]">
-              <EyeOff className="h-6 w-6 text-purple-400" />
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/20 via-pink-500/20 to-red-500/20 border border-sky-500/30 text-sky-400 shadow-[0_0_15px_rgba(14, 165, 233, 0.2)]">
+              <EyeOff className="h-6 w-6 text-sky-400" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight text-foreground bg-gradient-to-r from-foreground via-purple-300 to-purple-400 bg-clip-text text-transparent">
+                <h1 className="text-xl font-bold tracking-tight text-foreground bg-gradient-to-r from-foreground via-sky-300 to-sky-400 bg-clip-text text-transparent">
                   全市场暗盘资金流入排行榜
                 </h1>
-                <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-xs font-semibold text-purple-300">
+                <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 border border-sky-500/30 px-2 py-0.5 text-xs font-semibold text-sky-300">
                   <Sparkles className="h-3 w-3" />
                   冰山拆单·假跌真买探测
                 </span>
@@ -86,7 +86,7 @@ export function DarkPoolRanking() {
             </div>
             <div className="rounded-xl border border-border/80 bg-elevated/60 px-3.5 py-1.5 shadow-sm">
               <div className="text-[11px] text-muted">主力高控盘标的</div>
-              <div className="font-mono text-base font-bold text-purple-400">
+              <div className="font-mono text-base font-bold text-sky-400">
                 {stats?.heavy_control_count ?? '--'} 支
               </div>
             </div>
@@ -101,7 +101,7 @@ export function DarkPoolRanking() {
               disabled={isFetching}
               className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-medium text-foreground hover:bg-elevated transition-colors"
             >
-              <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin text-purple-400')} />
+              <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin text-sky-400')} />
               刷新
             </button>
           </div>
@@ -121,7 +121,7 @@ export function DarkPoolRanking() {
                     onClick={() => setSortBy('inflow')}
                     className={cn(
                       'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-                      sortBy === 'inflow' ? 'bg-purple-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
+                      sortBy === 'inflow' ? 'bg-sky-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
                     )}
                   >
                     💰 暗盘净流入
@@ -130,7 +130,7 @@ export function DarkPoolRanking() {
                     onClick={() => setSortBy('dai_score')}
                     className={cn(
                       'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-                      sortBy === 'dai_score' ? 'bg-purple-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
+                      sortBy === 'dai_score' ? 'bg-sky-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
                     )}
                   >
                     🎯 吸筹强度 (DAI)
@@ -139,7 +139,7 @@ export function DarkPoolRanking() {
                     onClick={() => setSortBy('inst_position')}
                     className={cn(
                       'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-                      sortBy === 'inst_position' ? 'bg-purple-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
+                      sortBy === 'inst_position' ? 'bg-sky-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
                     )}
                   >
                     🛡️ 主力资金仓位
@@ -148,7 +148,7 @@ export function DarkPoolRanking() {
                     onClick={() => setSortBy('amount')}
                     className={cn(
                       'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-                      sortBy === 'amount' ? 'bg-purple-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
+                      sortBy === 'amount' ? 'bg-sky-600 text-white shadow-sm' : 'text-muted hover:text-foreground'
                     )}
                   >
                     📊 成交额
@@ -165,7 +165,7 @@ export function DarkPoolRanking() {
                       onClick={() => setMinInflow(v)}
                       className={cn(
                         'px-2 py-1 rounded-md text-xs transition-all',
-                        minInflow === v ? 'bg-purple-500/20 text-purple-300 font-semibold' : 'text-muted hover:text-foreground'
+                        minInflow === v ? 'bg-sky-500/20 text-sky-300 font-semibold' : 'text-muted hover:text-foreground'
                       )}
                     >
                       {v >= 10000 ? `${v / 10000}亿` : `${v}万`}
@@ -183,7 +183,7 @@ export function DarkPoolRanking() {
                 placeholder="搜索代码 / 名称..."
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
-                className="w-full rounded-xl border border-border bg-elevated/60 pl-8 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-purple-500"
+                className="w-full rounded-xl border border-border bg-elevated/60 pl-8 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-sky-500"
               />
             </div>
           </div>
@@ -211,7 +211,7 @@ export function DarkPoolRanking() {
                 {isLoading ? (
                   <tr>
                     <td colSpan={10} className="py-12 text-center text-muted">
-                      <RefreshCw className="h-6 w-6 animate-spin mx-auto text-purple-400 mb-2" />
+                      <RefreshCw className="h-6 w-6 animate-spin mx-auto text-sky-400 mb-2" />
                       正在全市场实时解构暗盘资金...
                     </td>
                   </tr>
@@ -254,7 +254,7 @@ export function DarkPoolRanking() {
                         {/* 标的 */}
                         <td className="py-3 px-4">
                           <div className="flex flex-col font-sans">
-                            <span className="font-bold text-foreground group-hover:text-purple-400 transition-colors">
+                            <span className="font-bold text-foreground group-hover:text-sky-400 transition-colors">
                               {r.name}
                             </span>
                             <span className="text-[11px] text-muted font-mono">{r.symbol}</span>
@@ -282,7 +282,7 @@ export function DarkPoolRanking() {
                                 initial={{ width: 0 }}
                                 animate={{ width: `${barWidthPct}%` }}
                                 transition={{ duration: 0.5 }}
-                                className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 rounded-full"
+                                className="h-full bg-gradient-to-r from-sky-500 via-pink-500 to-red-500 rounded-full"
                               />
                             </div>
                           </div>
@@ -294,7 +294,7 @@ export function DarkPoolRanking() {
                             className={cn(
                               'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold font-mono',
                               r.dai_score >= 80
-                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
                                 : r.dai_score >= 60
                                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                                 : 'bg-slate-500/20 text-slate-300'
@@ -322,7 +322,7 @@ export function DarkPoolRanking() {
 
                         {/* 机构活跃度 */}
                         <td className="py-3 px-4 text-center">
-                          <span className="text-purple-400 font-bold">{r.inst_activity}</span>
+                          <span className="text-sky-400 font-bold">{r.inst_activity}</span>
                         </td>
 
                         {/* 暗盘特征标签 */}
@@ -336,7 +336,7 @@ export function DarkPoolRanking() {
                                   tag.includes('假跌')
                                     ? 'bg-red-500/10 border-red-500/30 text-red-400'
                                     : tag.includes('冰山')
-                                    ? 'bg-purple-500/10 border-purple-500/30 text-purple-300'
+                                    ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
                                     : tag.includes('锁仓')
                                     ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
                                     : 'bg-elevated border-border text-muted'
@@ -364,7 +364,7 @@ export function DarkPoolRanking() {
                               e.stopPropagation()
                               setPreviewSymbol(r.symbol)
                             }}
-                            className="text-xs text-purple-400 hover:text-purple-300 hover:underline"
+                            className="text-xs text-sky-400 hover:text-sky-300 hover:underline"
                           >
                             查看K线
                           </button>

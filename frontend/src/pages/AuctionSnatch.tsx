@@ -108,8 +108,8 @@ export function AuctionSnatch() {
       <div className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur-md px-6 py-4">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500/20 via-orange-500/20 to-red-500/20 border border-purple-500/30 text-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.15)]">
-              <Zap className="h-5 w-5 animate-pulse text-purple-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/20 via-orange-500/20 to-red-500/20 border border-sky-500/30 text-sky-400 shadow-[0_0_15px_rgba(14, 165, 233, 0.15)]">
+              <Zap className="h-5 w-5 animate-pulse text-sky-400" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -146,9 +146,9 @@ export function AuctionSnatch() {
             <button
               onClick={handleAiAnalyze}
               disabled={isAnalyzing || rows.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 text-xs font-semibold shadow-[0_0_12px_rgba(168,85,247,0.15)] transition-all cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 text-xs font-semibold shadow-[0_0_12px_rgba(14, 165, 233, 0.15)] transition-all cursor-pointer disabled:opacity-50"
             >
-              <Sparkles className={cn('h-3.5 w-3.5 text-purple-400', isAnalyzing && 'animate-spin')} />
+              <Sparkles className={cn('h-3.5 w-3.5 text-sky-400', isAnalyzing && 'animate-spin')} />
               <span>{isAnalyzing ? 'AI 解读中…' : 'AI 逻辑分析'}</span>
             </button>
 
@@ -174,7 +174,7 @@ export function AuctionSnatch() {
             {[
               { id: 'all', label: '🔥 全部竞价标的', count: data?.total || 0 },
               { id: 'gap_jump', label: '🚀 爆量跳空高开 (置顶推荐)', count: gapJumpCount, highlight: true },
-              { id: 'core_purple', label: '💜 核心强势抢筹', count: stats?.core_purple_count || 0 },
+              { id: 'core_purple', label: '🔹 核心强势抢筹', count: stats?.core_purple_count || 0 },
               { id: 'doji', label: '⭐ 十字星蓄势', count: stats?.doji_count || 0 },
             ].map((tab) => (
               <button
@@ -267,7 +267,7 @@ export function AuctionSnatch() {
                   onChange={(e) => setIncludeStar(e.target.checked)}
                   className="rounded border-border text-accent focus:ring-accent h-3.5 w-3.5"
                 />
-                <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-sky-500/10 text-sky-300 border border-sky-500/20">
                   科创板
                 </span>
               </label>
@@ -357,13 +357,13 @@ export function AuctionSnatch() {
               </div>
             </div>
 
-            <div className="p-4 rounded-xl border border-purple-500/30 bg-purple-500/[0.06] flex items-center gap-3 shadow-[0_0_15px_rgba(168,85,247,0.1)]">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.2)]">
+            <div className="p-4 rounded-xl border border-sky-500/30 bg-sky-500/[0.06] flex items-center gap-3 shadow-[0_0_15px_rgba(14, 165, 233, 0.1)]">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-[0_0_10px_rgba(14, 165, 233, 0.2)]">
                 <Sparkles className="h-5 w-5" />
               </div>
               <div>
-                <div className="text-[11px] text-purple-300/80 font-medium">💜 核心强势抢筹</div>
-                <div className="text-xl font-bold font-mono text-purple-200">
+                <div className="text-[11px] text-sky-300/80 font-medium">🔹 核心强势抢筹</div>
+                <div className="text-xl font-bold font-mono text-sky-200">
                   {stats.core_purple_count || 0} <span className="text-xs font-normal text-muted">只</span>
                 </div>
               </div>
@@ -408,22 +408,22 @@ export function AuctionSnatch() {
         )}
 
         {/* 涨停战法复盘特征提示栏 */}
-        <div className="rounded-xl border border-purple-500/30 bg-gradient-to-r from-purple-500/15 via-amber-500/10 to-transparent p-4 flex items-start gap-3.5 shadow-sm">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.2)]">
+        <div className="rounded-xl border border-sky-500/30 bg-gradient-to-r from-sky-500/15 via-amber-500/10 to-transparent p-4 flex items-start gap-3.5 shadow-sm">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-[0_0_10px_rgba(14, 165, 233, 0.2)]">
             <Zap className="h-4 w-4" />
           </div>
           <div className="text-xs space-y-1.5">
-            <div className="font-bold text-purple-200 flex items-center gap-2">
-              <span>💜 顶级核心强势抢筹战法（南京商旅范式）</span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/25 text-purple-200 border border-purple-500/40">
+            <div className="font-bold text-sky-200 flex items-center gap-2">
+              <span>🔹 顶级核心强势抢筹战法（南京商旅范式）</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/25 text-sky-200 border border-sky-500/40">
                 紫色极光核心标识 · 置顶推荐
               </span>
             </div>
             <p className="text-secondary leading-relaxed">
               <strong className="text-foreground">三大必杀起爆逻辑：</strong>
-              ① <span className="text-purple-300 font-semibold">放量试盘线 + 绝对防守底线</span>（前期放量试盘探测压力，随后缩量洗盘且<strong>收盘价坚决不破试盘最低价</strong>，主力控盘铁证）；
-              ② <span className="text-purple-300 font-semibold">竞价量比翻倍暴增</span>（早盘量比断层放大 &ge; 1.8~5.0，蓄势完毕合力发动总攻）；
-              ③ <span className="text-purple-300 font-semibold">充沛资金抢筹</span>（中小市值早盘/全天成交大额 &ge; 1.5 亿或竞价超千万，主力大单通吃上方挂单直接拉板）。
+              ① <span className="text-sky-300 font-semibold">放量试盘线 + 绝对防守底线</span>（前期放量试盘探测压力，随后缩量洗盘且<strong>收盘价坚决不破试盘最低价</strong>，主力控盘铁证）；
+              ② <span className="text-sky-300 font-semibold">竞价量比翻倍暴增</span>（早盘量比断层放大 &ge; 1.8~5.0，蓄势完毕合力发动总攻）；
+              ③ <span className="text-sky-300 font-semibold">充沛资金抢筹</span>（中小市值早盘/全天成交大额 &ge; 1.5 亿或竞价超千万，主力大单通吃上方挂单直接拉板）。
             </p>
           </div>
         </div>
@@ -475,7 +475,7 @@ export function AuctionSnatch() {
                       className={cn(
                         'hover:bg-elevated/40 transition-colors group cursor-pointer border-l-2',
                         row.is_core_purple
-                          ? 'border-l-purple-500 bg-purple-500/[0.07] hover:bg-purple-500/[0.12]'
+                          ? 'border-l-sky-500 bg-sky-500/[0.07] hover:bg-sky-500/[0.12]'
                           : row.is_gap_jump
                           ? 'border-l-orange-500 bg-orange-500/[0.07] hover:bg-orange-500/[0.12]'
                           : row.is_super_breakout
@@ -492,7 +492,7 @@ export function AuctionSnatch() {
                         <div className="flex items-center gap-2">
                           <span className={cn(
                             "font-bold transition-colors",
-                            row.is_core_purple ? "text-purple-200 group-hover:text-purple-300" : row.is_gap_jump ? "text-orange-200 group-hover:text-orange-300" : "text-foreground group-hover:text-accent"
+                            row.is_core_purple ? "text-sky-200 group-hover:text-sky-300" : row.is_gap_jump ? "text-orange-200 group-hover:text-orange-300" : "text-foreground group-hover:text-accent"
                           )}>
                             {row.name}
                           </span>
@@ -500,8 +500,8 @@ export function AuctionSnatch() {
                             {row.symbol}
                           </span>
                           {row.is_core_purple && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-gradient-to-r from-purple-500/30 to-fuchsia-500/30 text-purple-200 border border-purple-500/50 shadow-[0_0_8px_rgba(168,85,247,0.3)]">
-                              💜 核心强势抢筹
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-gradient-to-r from-sky-500/30 to-blue-500/30 text-sky-200 border border-sky-500/50 shadow-[0_0_8px_rgba(14, 165, 233, 0.3)]">
+                              🔹 核心强势抢筹
                             </span>
                           )}
                           {!row.is_core_purple && row.is_gap_jump && (
@@ -518,8 +518,8 @@ export function AuctionSnatch() {
 
                         {/* 试盘线防守底线信息 */}
                         {row.is_core_purple && row.test_date && row.test_low && (
-                          <div className="mt-1 flex items-center gap-1 text-[10px] text-purple-300/90 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded w-fit">
-                            <Zap className="h-2.5 w-2.5 text-purple-400 shrink-0" />
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-sky-300/90 bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded w-fit">
+                            <Zap className="h-2.5 w-2.5 text-sky-400 shrink-0" />
                             <span>试盘日 {row.test_date.slice(5)} · 坚守 ¥{row.test_low.toFixed(2)} 底线 ({row.defense_days}天未破)</span>
                           </div>
                         )}
@@ -537,7 +537,7 @@ export function AuctionSnatch() {
                           className={cn(
                             'px-1.5 py-0.5 rounded text-[10px] font-medium border',
                             row.board === '科创板'
-                              ? 'bg-purple-500/10 text-purple-300 border-purple-500/20'
+                              ? 'bg-sky-500/10 text-sky-300 border-sky-500/20'
                               : row.board === '创业板'
                               ? 'bg-blue-500/10 text-blue-300 border-blue-500/20'
                               : 'bg-surface text-secondary border-border'
@@ -570,7 +570,7 @@ export function AuctionSnatch() {
                           className={cn(
                             'px-2 py-0.5 rounded-md text-[11px] font-bold inline-flex items-center gap-1',
                             row.is_core_purple
-                              ? 'bg-gradient-to-r from-purple-500/25 to-fuchsia-500/25 text-purple-200 border border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.3)] font-extrabold'
+                              ? 'bg-gradient-to-r from-sky-500/25 to-blue-500/25 text-sky-200 border border-sky-500/50 shadow-[0_0_12px_rgba(14, 165, 233, 0.3)] font-extrabold'
                               : row.is_gap_jump
                               ? 'bg-gradient-to-r from-orange-500/25 to-red-500/25 text-orange-200 border border-orange-500/50 shadow-[0_0_12px_rgba(249,115,22,0.25)] font-extrabold'
                               : row.is_super_breakout
@@ -608,10 +608,10 @@ export function AuctionSnatch() {
                         <div className={cn(
                           "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-mono font-bold text-xs",
                           row.is_core_purple
-                            ? "bg-purple-500/20 border border-purple-500/40 text-purple-200 shadow-[0_0_8px_rgba(168,85,247,0.25)]"
+                            ? "bg-sky-500/20 border border-sky-500/40 text-sky-200 shadow-[0_0_8px_rgba(14, 165, 233, 0.25)]"
                             : "bg-gradient-to-r from-orange-500/15 to-red-500/15 border border-orange-500/30 text-amber-300"
                         )}>
-                          <Sparkles className={cn("h-3 w-3", row.is_core_purple ? "text-purple-300" : "text-amber-400")} />
+                          <Sparkles className={cn("h-3 w-3", row.is_core_purple ? "text-sky-300" : "text-amber-400")} />
                           {row.score}
                         </div>
                       </td>
@@ -622,7 +622,7 @@ export function AuctionSnatch() {
                           className={cn(
                             "px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer border",
                             row.is_core_purple
-                              ? "bg-purple-500/20 border-purple-500/30 text-purple-200 hover:bg-purple-500 hover:text-white"
+                              ? "bg-sky-500/20 border-sky-500/30 text-sky-200 hover:bg-sky-500 hover:text-white"
                               : "bg-elevated hover:bg-accent hover:text-white border-border"
                           )}
                         >

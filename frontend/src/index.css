@@ -2,51 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-/* === §6.0 FinTech Quantum UI 设计语言 ===
- * 机构级量化终端暗黑矩阵 + 霓虹高反差 + 玻璃拟态
- */
+/* ==========================================================================
+   ⚡ 云之心量化 (CLOUD HEART QUANT) · 史诗级超能暗黑深海科技蓝视觉系统 ⚡
+   ========================================================================== */
+
 :root {
-  /* 亮色模式 */
-  --base: 220 20% 98%;
+  /* 亮色模式 (日间柔和金融蓝) */
+  --base: 215 32% 98%;
   --surface: 0 0% 100%;
-  --elevated: 220 15% 95%;
-  --border: 220 13% 88%;
-  --border-subtle: 220 13% 92%;
+  --elevated: 215 28% 94%;
+  --border: 215 22% 86%;
+  --border-subtle: 215 20% 92%;
+  --border-glow: 199 95% 50%;
   --fg-primary: 222 47% 11%;
-  --fg-secondary: 215 16% 40%;
-  --fg-muted: 215 16% 60%;
-  --accent: 217 91% 60%;
+  --fg-secondary: 215 24% 36%;
+  --fg-muted: 215 18% 56%;
+  --accent: 199 95% 48%;       /* 云之心天青蓝 #0099ff */
   --bull: 354 84% 57%;        /* 鲜亮激光红 */
   --bear: 152 76% 40%;        /* 矩阵翡翠绿 */
-  --warning: 38 92% 50%;
+  --warning: 42 96% 54%;       /* 鎏金黄 #f59e0b */
   --danger: 354 84% 57%;
 }
 
 html.dark {
-  /* 深度量子暗黑矩阵 */
-  --base: 224 36% 5%;          /* #060913 深度星空底色 */
-  --surface: 223 30% 9%;       /* #0f1523 玻璃基底 */
-  --elevated: 222 28% 14%;     /* #192237 浮层 */
-  --border: 223 20% 20%;       /* #263147 质感边框 */
-  --border-subtle: 223 20% 15%;/* #1d2536 */
-  --border-glow: 260 84% 65%;  /* #a855f7 霓虹微光 */
-  --fg-primary: 210 40% 98%;   /* #f8fafc 高对比主文本 */
-  --fg-secondary: 215 20% 75%; /* #cbd5e1 次级文字 */
-  --fg-muted: 215 16% 55%;     /* #8493a8 辅助提示 */
-  --accent: 217 91% 60%;       /* #3b82f6 电光蓝 */
-  --bull: 354 90% 60%;         /* #ff334b 激光红 */
-  --bear: 152 82% 45%;         /* #00e676 矩阵绿 */
-  --warning: 38 96% 54%;       /* #fbbf24 琥珀金 */
-  --danger: 354 90% 60%;
+  /* 深度云之心暗黑深海蓝矩阵 (Ultra Cyber Sapphire & Neon Cyan) */
+  --base: 222 60% 4%;          /* #040813 纯正宇宙深渊深海蓝黑 */
+  --surface: 220 50% 8.5%;     /* #0b1528 剔透深海晶体玻璃基底 */
+  --elevated: 218 45% 13%;     /* #12213d 钛金科技深蓝浮层 */
+  --border: 215 55% 24%;       /* #1b3866 醒目电光冰蓝边框 */
+  --border-subtle: 217 45% 16%;/* #122544 暗流边框 */
+  --border-glow: 195 100% 50%; /* #00e5ff 耀眼天青强激光 */
+  --fg-primary: 210 50% 99%;   /* #f9fbff 纯净高对比白 */
+  --fg-secondary: 213 35% 84%; /* #d0def2 冰霜亮蓝次级文本 */
+  --fg-muted: 215 28% 62%;     /* #8fa5c5 科技蓝灰辅助文字 */
+  --accent: 195 100% 50%;      /* #00e5ff 云之心核心天青超能蓝 */
+  --accent-hover: 190 100% 60%;/* #33eeff */
+  --bull: 354 95% 62%;         /* #ff3b53 激光红 */
+  --bear: 152 90% 48%;         /* #00e676 矩阵绿 */
+  --warning: 42 100% 55%;      /* #f59e0b 云之心 Logo 鎏金暖黄 */
+  --danger: 354 95% 62%;
 }
 
-/* 全局沉浸式量子流体环境光背景 */
+/* 🌌 震撼全局超能深海量子金属网格背景 🌌 */
 body {
   background-color: hsl(var(--base));
   background-image: 
-    radial-gradient(circle at 50% 0%, rgba(30, 48, 87, 0.4) 0%, transparent 60%),
-    radial-gradient(circle at 100% 100%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 0% 100%, rgba(6, 182, 212, 0.06) 0%, transparent 50%);
+    radial-gradient(circle at 50% -10%, rgba(0, 229, 255, 0.28) 0%, transparent 65%),
+    radial-gradient(circle at 100% 100%, rgba(37, 99, 235, 0.22) 0%, transparent 55%),
+    radial-gradient(circle at 0% 100%, rgba(6, 182, 212, 0.20) 0%, transparent 55%),
+    radial-gradient(circle at 80% 20%, rgba(30, 64, 175, 0.18) 0%, transparent 50%),
+    linear-gradient(to right, rgba(0, 229, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 229, 255, 0.07) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 28px 28px, 28px 28px;
   background-attachment: fixed;
   color: hsl(var(--fg-primary));
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum';
@@ -55,41 +62,79 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* 玻璃拟态与金融科技卡片质感 */
+/* 💎 全局玻璃拟态与钛金科技卡片质感 (醒目超能版) 💎 */
 .glass-panel {
-  background: rgba(15, 21, 35, 0.72);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(14, 26, 50, 0.88) 0%, rgba(8, 16, 32, 0.94) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.75), inset 0 1px 1px 0 rgba(0, 229, 255, 0.35);
 }
 
 .glass-card {
-  background: linear-gradient(135deg, rgba(25, 34, 55, 0.6) 0%, rgba(15, 21, 35, 0.75) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  background: linear-gradient(145deg, rgba(18, 34, 62, 0.75) 0%, rgba(9, 18, 36, 0.90) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 229, 255, 0.24);
+  box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.7), inset 0 1px 1px 0 rgba(255, 255, 255, 0.12);
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-card:hover {
-  border-color: rgba(168, 85, 247, 0.35);
-  box-shadow: 0 8px 30px -4px rgba(168, 85, 247, 0.15), 0 4px 12px rgba(0, 0, 0, 0.5);
-  transform: translateY(-1px);
+  border-color: rgba(0, 229, 255, 0.7);
+  box-shadow: 0 16px 48px -4px rgba(0, 229, 255, 0.38), 0 6px 20px rgba(0, 0, 0, 0.8), inset 0 1px 2px 0 rgba(0, 229, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+/* 钛金金属渐变边框卡片 */
+.titanium-card {
+  position: relative;
+  background: linear-gradient(145deg, rgba(16, 30, 56, 0.90) 0%, rgba(7, 14, 28, 0.96) 100%);
+  border: 1px solid rgba(0, 229, 255, 0.32);
+  border-radius: 12px;
+  backdrop-filter: blur(24px);
+  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.8), inset 0 1px 1px 0 rgba(0, 229, 255, 0.4);
+}
+
+.titanium-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.9), rgba(245, 158, 11, 0.8), transparent);
+}
+
+/* ⚡ 超能霓虹激光按钮 ⚡ */
+.cyber-button {
+  background: linear-gradient(135deg, #00d2ff 0%, #0077ff 50%, #0044ff 100%);
+  color: #ffffff;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 20px rgba(0, 210, 255, 0.45), 0 4px 12px rgba(0, 0, 0, 0.5);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cyber-button:hover {
+  box-shadow: 0 0 32px rgba(0, 210, 255, 0.75), 0 6px 20px rgba(0, 0, 0, 0.6);
+  transform: translateY(-1.5px);
 }
 
 /* 霓虹发光文字与边框 */
 .glow-text-bull {
-  text-shadow: 0 0 10px rgba(255, 51, 75, 0.45);
+  text-shadow: 0 0 14px rgba(255, 59, 83, 0.75);
 }
 .glow-text-bear {
-  text-shadow: 0 0 10px rgba(0, 230, 118, 0.45);
-}
-.glow-text-purple {
-  text-shadow: 0 0 12px rgba(168, 85, 247, 0.5);
+  text-shadow: 0 0 14px rgba(0, 230, 118, 0.75);
 }
 .glow-text-cyan {
-  text-shadow: 0 0 12px rgba(6, 182, 212, 0.5);
+  text-shadow: 0 0 20px rgba(0, 229, 255, 0.9), 0 0 40px rgba(0, 229, 255, 0.45);
+}
+.glow-text-blue {
+  text-shadow: 0 0 20px rgba(59, 130, 246, 0.85);
+}
+.glow-text-gold {
+  text-shadow: 0 0 16px rgba(245, 158, 11, 0.85);
 }
 
 /* 动感微动效动画 */
@@ -97,27 +142,48 @@ body {
   0%, 100% {
     transform: scale(1);
     opacity: 1;
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.9);
   }
   50% {
-    transform: scale(1.1);
-    opacity: 0.85;
-    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+    transform: scale(1.15);
+    opacity: 0.95;
+    box-shadow: 0 0 0 10px rgba(0, 229, 255, 0);
   }
 }
 
+@keyframes laserShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
 @keyframes tickerFlashUp {
-  0% { background-color: rgba(239, 68, 68, 0.4); }
+  0% { background-color: rgba(255, 59, 83, 0.5); }
   100% { background-color: transparent; }
 }
 
 @keyframes tickerFlashDown {
-  0% { background-color: rgba(16, 185, 129, 0.4); }
+  0% { background-color: rgba(0, 230, 118, 0.5); }
   100% { background-color: transparent; }
 }
 
 .animate-quant-pulse {
   animation: quantPulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.laser-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.laser-shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0, 229, 255, 0.35), transparent);
+  transform: skewX(-20deg);
+  animation: laserShimmer 2.5s infinite ease-in-out;
 }
 
 .flash-up {
@@ -128,28 +194,29 @@ body {
   animation: tickerFlashDown 0.8s ease-out;
 }
 
-/* 全局滚动条高科技定制 */
+/* 全局滚动条高科技定制 (醒目天青蓝) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: rgba(0, 229, 255, 0.4) transparent;
 }
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 *::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(4, 8, 19, 0.6);
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(0, 229, 255, 0.35);
   border-radius: 999px;
+  border: 1px solid rgba(0, 229, 255, 0.2);
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(168, 85, 247, 0.6);
+  background: rgba(0, 229, 255, 0.9);
+  box-shadow: 0 0 14px rgba(0, 229, 255, 0.75);
 }
 
 .tabular { font-variant-numeric: tabular-nums; }
 .num { font-family: theme('fontFamily.mono'); font-variant-numeric: tabular-nums; }
 
 * { border-color: hsl(var(--border)); }
-

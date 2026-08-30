@@ -203,7 +203,7 @@ class StrategyBacktestRequest(BaseModel):
     max_positions: int = 10
     max_exposure_pct: float = 1.0
     initial_capital: float = 1_000_000.0
-    position_sizing: Literal["equal", "score_weight"] = "equal"
+    position_sizing: Literal["equal", "score_weight", "dynamic_full"] = "equal"
     mode: Literal["position", "full"] = "position"
     holding_days: int = 5
     asset_type: str = "stock"

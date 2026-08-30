@@ -291,9 +291,9 @@ export function TomorrowCatalyst() {
                 setAiMode('catalysts')
                 setIsAiModalOpen(true)
               }}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-purple-500/30 bg-purple-500/10 text-xs font-medium text-purple-300 hover:bg-purple-500/20 hover:border-purple-500/50 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-sky-500/30 bg-sky-500/10 text-xs font-medium text-sky-300 hover:bg-sky-500/20 hover:border-sky-500/50 transition-colors cursor-pointer"
             >
-              <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+              <Sparkles className="h-3.5 w-3.5 text-sky-400" />
               AI 智能提炼
             </button>
 
@@ -351,7 +351,7 @@ export function TomorrowCatalyst() {
                   setAiMode('morning')
                   setIsAiModalOpen(true)
                 }}
-                className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer font-medium"
+                className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer font-medium"
               >
                 <Sparkles className="h-3 w-3" />
                 AI 重算早盘
@@ -454,7 +454,7 @@ export function TomorrowCatalyst() {
                           <div className="space-y-2.5 flex-1 min-w-0">
                             {/* 题材标签 & 标题 */}
                             <div className="flex items-center flex-wrap gap-2.5">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-purple-500/15 text-purple-300 border border-purple-500/25">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-sky-500/15 text-sky-300 border border-sky-500/25">
                                 {item.tag}
                               </span>
                               <h3 className="text-sm md:text-base font-bold text-foreground tracking-tight group-hover:text-accent transition-colors">
@@ -583,10 +583,10 @@ export function TomorrowCatalyst() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg rounded-2xl border border-purple-500/30 bg-surface p-6 shadow-2xl space-y-4"
+              className="w-full max-w-lg rounded-2xl border border-sky-500/30 bg-surface p-6 shadow-2xl space-y-4"
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-purple-400 font-bold">
+                <div className="flex items-center gap-2 text-sky-400 font-bold">
                   <Sparkles className="h-5 w-5" />
                   <span>{aiMode === 'catalysts' ? 'AI 全天热点提炼 (AKShare + 大模型)' : 'AI 生成今日早盘开盘前瞻'}</span>
                 </div>
@@ -631,7 +631,7 @@ export function TomorrowCatalyst() {
                     type="date"
                     value={selectedDate}
                     onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-full text-xs rounded-lg border border-border bg-elevated px-3 py-2 text-foreground focus:outline-none focus:border-purple-500"
+                    className="w-full text-xs rounded-lg border border-border bg-elevated px-3 py-2 text-foreground focus:outline-none focus:border-sky-500"
                   />
                 </div>
                 <div className="flex flex-col justify-end">
@@ -649,7 +649,7 @@ export function TomorrowCatalyst() {
                   rows={3}
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-border bg-elevated p-3 text-foreground focus:outline-none focus:border-purple-500 transition-colors"
+                  className="w-full text-xs rounded-xl border border-border bg-elevated p-3 text-foreground focus:outline-none focus:border-sky-500 transition-colors"
                 />
               </div>
 
@@ -669,7 +669,7 @@ export function TomorrowCatalyst() {
                     }
                   }}
                   disabled={aiCatalystsMutation.isPending || aiMorningMutation.isPending}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 text-xs font-semibold text-white shadow-lg shadow-purple-500/25 hover:from-purple-500 hover:to-indigo-500 transition-all cursor-pointer disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-sky-600 to-indigo-600 text-xs font-semibold text-white shadow-lg shadow-sky-500/25 hover:from-sky-500 hover:to-indigo-500 transition-all cursor-pointer disabled:opacity-50"
                 >
                   {aiCatalystsMutation.isPending || aiMorningMutation.isPending ? (
                     <>

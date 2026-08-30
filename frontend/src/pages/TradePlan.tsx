@@ -105,7 +105,7 @@ export function TradePlan() {
 
       const curMins = hours * 60 + mins
       if (curMins >= 9 * 60 + 15 && curMins < 9 * 60 + 25) {
-        setMarketStatus({ status: '集合竞价中', desc: '9:15-9:25 观察竞价与高开幅度', color: 'text-purple-400' })
+        setMarketStatus({ status: '集合竞价中', desc: '9:15-9:25 观察竞价与高开幅度', color: 'text-sky-400' })
       } else if (curMins >= 9 * 60 + 25 && curMins < 9 * 60 + 30) {
         setMarketStatus({ status: '即将开盘', desc: '9:25-9:30 锁定竞价抢筹龙头', color: 'text-cyan-400' })
       } else if (curMins >= 14 * 60 + 25 && curMins < 14 * 60 + 55) {

@@ -157,7 +157,7 @@ const SRC_MAP: Record<string, string> = { builtin: '内置', custom: '自定义'
 const TRADE_PAGE_SIZE_OPTIONS = [10, 20, 30, 50, 100]
 const BADGE_CLS_MAP: Record<string, string> = {
   builtin: 'bg-secondary/10 text-muted border-border',
-  ai: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+  ai: 'bg-sky-500/10 text-sky-400 border-sky-500/30',
   custom: 'bg-amber-400/10 text-amber-400 border-amber-400/30',
   composite: 'bg-teal-500/10 text-teal-400 border-teal-500/30',
 }
@@ -1677,6 +1677,7 @@ export function StrategyBacktest() {
             <select value={positionSizing} onChange={e => setPositionSizing(e.target.value as any)} className={INPUT_CLS}>
               <option value="equal">等权买入</option>
               <option value="score_weight">评分加权</option>
+              <option value="dynamic_full">资金全部打满 (不留闲置)</option>
             </select>
           </div>
           <div>

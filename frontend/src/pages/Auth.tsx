@@ -97,7 +97,7 @@ export function Auth() {
           <div className="mb-5 flex items-center gap-2.5">
             <div className={cn(
               'grid h-9 w-9 place-items-center rounded-lg',
-              isSetup ? 'bg-accent/15 text-accent' : 'bg-purple-500/15 text-purple-400',
+              isSetup ? 'bg-accent/15 text-accent' : 'bg-sky-500/15 text-sky-400',
             )}>
               {isSetup ? <ShieldCheck className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
             </div>

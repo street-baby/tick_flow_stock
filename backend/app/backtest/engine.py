@@ -69,7 +69,7 @@ class MatcherConfig:
     score_min: float | None = None
     score_max: float | None = None
     initial_capital: float = 1_000_000.0
-    position_sizing: Literal["equal", "score_weight"] = "equal"
+    position_sizing: Literal["equal", "score_weight", "dynamic_full"] = "equal"
     # 分钟K精确成交: 开启后, 信号触发日的成交价用当日分钟K优化
     # (有参考线→穿越价, 无参考线→VWAP)。数据缺失时降级为日K口径。
     minute_fill: bool = False
@@ -1962,8 +1962,12 @@ class BacktestEngine:
                     selected = candidates[:slots]
                     market_value_before = _market_value()
                     equity_before = cash + market_value_before
-                    target_value = equity_before * max_exposure_pct / max_positions
                     exposure_capacity = equity_before * max_exposure_pct - market_value_before
+                    if config.position_sizing == "dynamic_full":
+                        single_cap = equity_before * max(1.0 / max(max_positions, 1), 0.35) if max_positions > 1 else exposure_capacity
+                        target_value = min(exposure_capacity / max(len(selected), 1), single_cap)
+                    else:
+                        target_value = equity_before * max_exposure_pct / max_positions
                     if equity_before <= 0 or exposure_capacity <= 0 or max_exposure_pct <= 0:
                         execution_stats["buy_exposure"] += len(selected)
                     else:
@@ -2509,9 +2513,13 @@ class BacktestEngine:
             if account_equity_before_buy <= 0 or max_exposure_pct <= 0:
                 execution_stats["buy_exposure"] += len(selected)
                 return
-            target_position_value = account_equity_before_buy * max_exposure_pct / max_positions
             max_exposure_value = account_equity_before_buy * max_exposure_pct
             exposure_capacity = max_exposure_value - market_value_before
+            if config.position_sizing == "dynamic_full":
+                single_cap = account_equity_before_buy * max(1.0 / max(max_positions, 1), 0.35) if max_positions > 1 else exposure_capacity
+                target_position_value = min(exposure_capacity / max(len(selected), 1), single_cap)
+            else:
+                target_position_value = account_equity_before_buy * max_exposure_pct / max_positions
             if exposure_capacity <= 0:
                 execution_stats["buy_exposure"] += len(selected)
                 return

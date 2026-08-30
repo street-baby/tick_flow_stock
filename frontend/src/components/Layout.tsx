@@ -59,8 +59,6 @@ import { toggleTheme, useTheme } from '@/lib/theme'
 import { setCurrentTotal as setAlertTotal, useUnreadAlerts } from '@/lib/monitorBadge'
 import { useMarket } from '@/lib/market'
 
-// 品牌色 — 只用于 logo / brand 区域,不影响功能语义色
-const BRAND = '#8B5CF6'
 const TICKFLOW_REGISTER_URL = 'https://tickflow.org/auth/register?ref=V3KDKGXPEA'
 
 const CORE_INDEXES = [
@@ -256,13 +254,13 @@ function TierBadge({ label, hasKey }: { label: string; hasKey?: boolean }) {
     },
     pro: {
       desc: '分钟K · 实时行情 · 盘口',
-      tagBg: { background: 'linear-gradient(135deg, rgba(168,85,247,0.2), rgba(124,58,237,0.15))' },
+      tagBg: { background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.2), rgba(124,58,237,0.15))' },
       dotStyle: { background: 'linear-gradient(135deg, #a855f7, #7c3aed)' },
       labelTextStyle: { background: 'linear-gradient(135deg, #c084fc, #a855f7)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' },
     },
     expert: {
       desc: 'WebSocket · 财务数据',
-      tagBg: { background: 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(168,85,247,0.2), rgba(245,158,11,0.2))' },
+      tagBg: { background: 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(14, 165, 233, 0.2), rgba(245,158,11,0.2))' },
       dotStyle: { background: 'linear-gradient(135deg, #3b82f6, #a855f7, #f59e0b)' },
       labelTextStyle: { background: 'linear-gradient(135deg, #60a5fa, #c084fc, #fbbf24)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' },
     },
@@ -317,10 +315,10 @@ function AIConfigBadge({ configured, model }: { configured?: boolean; model?: st
       className="mt-2 group block -mx-2.5"
       title="AI 配置"
     >
-      <div className="relative overflow-hidden rounded-lg border border-purple-400/20 bg-gradient-to-br from-purple-500/[0.12] via-surface to-surface px-3 py-2 transition-all hover:border-purple-400/35 hover:from-purple-500/[0.16]">
-        <div className="absolute -right-5 -top-6 h-14 w-14 rounded-full bg-purple-500/10 blur-2xl" />
+      <div className="relative overflow-hidden rounded-lg border border-sky-400/20 bg-gradient-to-br from-sky-500/[0.12] via-surface to-surface px-3 py-2 transition-all hover:border-sky-400/35 hover:from-sky-500/[0.16]">
+        <div className="absolute -right-5 -top-6 h-14 w-14 rounded-full bg-sky-500/10 blur-2xl" />
         <div className="relative flex items-center gap-2">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-purple-400/10 text-purple-300 ring-1 ring-purple-400/20">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-sky-400/10 text-sky-300 ring-1 ring-sky-400/20">
             <Sparkles className="h-3.5 w-3.5" />
           </div>
           <div className="min-w-0 flex-1">
@@ -332,7 +330,7 @@ function AIConfigBadge({ configured, model }: { configured?: boolean; model?: st
               {configured ? (model || '已接入模型') : '接入策略生成模型'}
             </div>
           </div>
-          <Settings className="h-3 w-3 text-muted group-hover:text-purple-300 transition-colors" />
+          <Settings className="h-3 w-3 text-muted group-hover:text-sky-300 transition-colors" />
         </div>
       </div>
     </NavLink>
@@ -525,36 +523,39 @@ export function Layout() {
   }
 
   return (
-    <div className="h-screen grid grid-cols-[14.5rem_1fr] bg-base text-foreground overflow-hidden">
-      <aside className="border-r border-border/70 bg-surface/75 backdrop-blur-xl flex flex-col h-full min-h-0 overflow-hidden shadow-2xl relative z-10">
-        <div className="px-5 py-4 border-b border-border/60 shrink-0 bg-gradient-to-b from-purple-950/20 via-transparent to-transparent">
-          {/* Brand block — 原创 logo + 量化终极端高科技标识 */}
+    <div className="h-screen grid grid-cols-[14.5rem_1fr] bg-base text-foreground overflow-hidden relative">
+      {/* 🌌 顶部全景超能激光光轨 🌌 */}
+      <div className="fixed top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400 via-sky-400 to-transparent z-[9999] opacity-90 shadow-[0_0_16px_rgba(0,229,255,0.9)]" />
+
+      <aside className="border-r border-cyan-500/30 bg-gradient-to-b from-[#081224]/98 via-[#050c1b]/98 to-[#03060f]/99 backdrop-blur-3xl flex flex-col h-full min-h-0 overflow-hidden shadow-[6px_0_30px_rgba(0,0,0,0.85)] relative z-10">
+        <div className="px-4 py-3.5 border-b border-cyan-500/25 shrink-0 bg-gradient-to-b from-cyan-500/[0.16] via-sky-950/[0.12] to-transparent relative">
+          <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent" />
+          {/* Brand block — 官方云之心量化 logo 标识 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="relative">
-                <Logo
-                  size={28}
-                  className="shrink-0 drop-shadow-[0_0_12px_rgba(168,85,247,0.6)]"
-                  style={{ color: BRAND }}
-                />
-                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 animate-quant-pulse shadow-[0_0_8px_#10b981]" />
+              <div className="relative group">
+                <div className="absolute -inset-1 rounded-xl bg-gradient-to-r from-cyan-400/50 to-blue-600/50 blur-md opacity-85 group-hover:opacity-100 transition-opacity animate-pulse" />
+                <div className="relative p-0.5 rounded-xl bg-gradient-to-br from-cyan-400/30 via-slate-900 to-slate-950 border border-cyan-400/40 shadow-[0_0_16px_rgba(0,229,255,0.4)]">
+                  <Logo
+                    size={32}
+                    className="shrink-0 drop-shadow-[0_0_18px_rgba(0,229,255,0.9)]"
+                  />
+                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 animate-quant-pulse shadow-[0_0_10px_#10b981]" />
+                </div>
               </div>
-              <div
-                className="font-bold tracking-[0.04em] text-foreground leading-tight"
-                style={{ textShadow: `0 0 12px ${BRAND}55` }}
-              >
-                <div className="bg-gradient-to-r from-white via-purple-200 to-purple-400 bg-clip-text text-transparent font-sans text-sm font-extrabold tracking-wide">
+              <div className="font-bold tracking-[0.04em] text-foreground leading-tight">
+                <div className="bg-gradient-to-r from-white via-cyan-100 to-cyan-300 bg-clip-text text-transparent font-sans text-[14px] font-extrabold tracking-wide drop-shadow-[0_0_14px_rgba(0,229,255,0.5)]">
                   云之心量化
                 </div>
-                <div className="text-[9px] text-purple-300 font-semibold tracking-widest font-mono">
-                  QUANT TERMINAL
+                <div className="text-[8.5px] text-cyan-300 font-bold tracking-wider font-mono flex items-center gap-1">
+                  <span>CLOUD HEART QUANT</span>
                 </div>
               </div>
             </div>
             
-            {/* 极简行情引擎状态微灯 */}
-            <div className="flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-mono text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.2)]">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            {/* 行情引擎状态微灯 */}
+            <div className="flex items-center gap-1 rounded-full bg-emerald-500/20 border border-emerald-400/50 px-1.5 py-0.5 text-[9px] font-mono text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.45)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]" />
               LIVE
             </div>
           </div>
@@ -598,7 +599,7 @@ export function Layout() {
                     <span className="truncate">{group.category}</span>
                     {/* 折叠时若内部有当前活跃路由，显示微光提示点 */}
                     {isCollapsed && hasActiveChild && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-purple-400 animate-pulse shadow-[0_0_6px_#a855f7]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse shadow-[0_0_6px_#a855f7]" />
                     )}
                   </div>
                   <div className="flex items-center gap-1">
@@ -630,14 +631,14 @@ export function Layout() {
                             cn(
                               'group relative flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200',
                               isActive
-                                ? 'bg-gradient-to-r from-purple-500/20 via-purple-500/10 to-transparent text-purple-200 font-semibold border-l-2 border-purple-400 shadow-[inset_0_0_12px_rgba(168,85,247,0.15)] pl-3.5'
-                                : 'text-foreground/75 hover:bg-elevated/70 hover:text-foreground hover:translate-x-0.5',
+                                ? 'bg-gradient-to-r from-cyan-500/30 via-sky-600/20 to-transparent text-white font-extrabold border-l-[3px] border-cyan-400 shadow-[0_0_22px_rgba(0,229,255,0.45)] pl-3.5'
+                                : 'text-foreground/80 hover:bg-gradient-to-r hover:from-cyan-500/15 hover:to-transparent hover:text-white hover:translate-x-1',
                             )
                           }
                         >
                           {({ isActive }) => (
                             <>
-                              <Icon className={cn('h-4 w-4 shrink-0 transition-transform group-hover:scale-110 duration-200', isActive ? 'text-purple-400' : 'text-muted group-hover:text-foreground')} />
+                              <Icon className={cn('h-4 w-4 shrink-0 transition-transform group-hover:scale-110 duration-200', isActive ? 'text-cyan-300 drop-shadow-[0_0_8px_rgba(0,229,255,0.8)]' : 'text-muted group-hover:text-foreground')} />
                               <span className="flex-1 tracking-wide">{label}</span>
                               {badge && (
                                 <span className={cn(
@@ -646,7 +647,7 @@ export function Layout() {
                                     ? 'border border-red-500/40 bg-red-500/15 text-red-300 shadow-[0_0_8px_rgba(239,68,68,0.25)]'
                                     : badge === '9:25'
                                     ? 'border border-amber-400/40 bg-amber-400/15 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.25)]'
-                                    : 'border border-purple-400/30 bg-purple-400/10 text-purple-300'
+                                    : 'border border-sky-400/30 bg-sky-400/10 text-sky-300'
                                 )}>
                                   {badge}
                                 </span>

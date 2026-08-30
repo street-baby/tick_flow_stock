@@ -88,7 +88,7 @@ const _SOURCE_BADGE: Record<string, string> = {
   strategy: 'bg-amber-400/10 text-amber-400',
   signal: 'bg-accent/10 text-accent',
   price: 'bg-emerald-400/10 text-emerald-400',
-  market: 'bg-purple-500/10 text-purple-400',
+  market: 'bg-sky-500/10 text-sky-400',
   sector: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
 }
 const _SOURCE_LABEL: Record<string, string> = {
@@ -780,50 +780,51 @@ export function Dashboard() {
       )}
 
       {/* 🎯 市场核心决策摘要区 (Executive Market Summary) */}
-      <div className="mb-2 rounded-xl border border-purple-500/25 bg-gradient-to-r from-surface/90 via-surface/80 to-purple-950/20 p-3 backdrop-blur-md shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 pb-2">
-          <div className="flex items-center gap-2">
-            <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-purple-500/15 text-purple-400 border border-purple-500/30">
-              <Sparkles className="h-3 w-3" />
+      <div className="mb-3 rounded-2xl border border-cyan-500/40 bg-gradient-to-r from-[#0d1e38]/95 via-[#081326]/95 to-[#040813]/95 p-4 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(0,229,255,0.4)] relative overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400 via-sky-300 to-transparent" />
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyan-500/20 pb-2.5">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400/30 to-blue-600/30 text-cyan-300 border border-cyan-400/50 shadow-[0_0_12px_rgba(0,229,255,0.5)]">
+              <Sparkles className="h-3.5 w-3.5" />
             </span>
-            <span className="text-xs font-bold text-foreground">
+            <span className="text-sm font-extrabold text-white tracking-wide drop-shadow-[0_0_8px_rgba(0,229,255,0.3)]">
               今日市场综述：{data.emotion?.label}（{score >= 60 ? '多头占优·积极做多' : score >= 45 ? '结构震荡·轻指数重个股' : '偏冷退潮·控制仓位防守'}）
             </span>
           </div>
           <div className="flex items-center gap-3 text-[11px] font-mono text-muted">
-            <span>📅 日期: <strong className="text-foreground">{currentDate}</strong></span>
-            <span>⏱️ 状态: <strong className={quoteRunning ? 'text-emerald-400' : 'text-amber-400'}>{quoteRunning ? '全景实时' : '盘后快照'}</strong></span>
-            <span>⚡ 情绪: <strong style={{ color: scoreColor(score) }}>{score} 分</strong></span>
+            <span>📅 日期: <strong className="text-cyan-200">{currentDate}</strong></span>
+            <span>⏱️ 状态: <strong className={quoteRunning ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}>{quoteRunning ? '全景实时' : '盘后快照'}</strong></span>
+            <span>⚡ 情绪: <strong className="text-sm font-bold" style={{ color: scoreColor(score), textShadow: `0 0 12px ${scoreColor(score)}` }}>{score} 分</strong></span>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 text-xs">
-          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
-            <span className="text-muted text-[11px] shrink-0">{isCn ? '🎯 领涨主线:' : '🎯 市场偏向:'}</span>
-            <span className="font-semibold text-bull truncate">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-3 text-xs">
+          <div className="flex items-center gap-2 rounded-xl bg-[#0e1d35]/80 px-3 py-2 border border-cyan-500/25 shadow-inner">
+            <span className="text-cyan-300/80 text-[11px] font-medium shrink-0">{isCn ? '🎯 领涨主线:' : '🎯 市场偏向:'}</span>
+            <span className="font-bold text-bull truncate text-xs drop-shadow-[0_0_8px_rgba(255,59,83,0.4)]">
               {isCn
                 ? (data.concept_rank?.leading?.[0]?.name ? `${data.concept_rank.leading[0].name} (${fmtStockPct(data.concept_rank.leading[0].avg_pct)})` : '光通信/算力芯片')
                 : (data.breadth.up >= data.breadth.down ? `多头占优 (上涨率 ${data.breadth.up_pct.toFixed(1)}%)` : `空头承压 (下跌率 ${data.breadth.down_pct.toFixed(1)}%)`)}
             </span>
           </div>
-          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
-            <span className="text-muted text-[11px] shrink-0">{isCn ? '⚠️ 领跌风险:' : '⚡ 动量新高:'}</span>
-            <span className="font-semibold text-bear truncate">
+          <div className="flex items-center gap-2 rounded-xl bg-[#0e1d35]/80 px-3 py-2 border border-cyan-500/25 shadow-inner">
+            <span className="text-cyan-300/80 text-[11px] font-medium shrink-0">{isCn ? '⚠️ 领跌风险:' : '⚡ 动量新高:'}</span>
+            <span className="font-bold text-bear truncate text-xs drop-shadow-[0_0_8px_rgba(0,230,118,0.4)]">
               {isCn
                 ? (data.concept_rank?.lagging?.[0]?.name ? `${data.concept_rank.lagging[0].name} (${fmtStockPct(data.concept_rank.lagging[0].avg_pct)})` : '医药生物/农林牧渔')
                 : <span className="text-bull font-mono">{data.limit?.limit_up ?? 0} 只创60日新高</span>}
             </span>
           </div>
-          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
-            <span className="text-muted text-[11px] shrink-0">{isCn ? '🔥 最高连板:' : '🌐 覆盖标的:'}</span>
-            <span className="font-mono font-bold text-amber-400 truncate">
+          <div className="flex items-center gap-2 rounded-xl bg-[#0e1d35]/80 px-3 py-2 border border-cyan-500/25 shadow-inner">
+            <span className="text-cyan-300/80 text-[11px] font-medium shrink-0">{isCn ? '🔥 最高连板:' : '🌐 覆盖标的:'}</span>
+            <span className="font-mono font-extrabold text-amber-300 truncate text-xs drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]">
               {isCn ? (data.limit?.max_boards ? `${data.limit.max_boards} 连板` : '—') : `${data.breadth.total} 只 ${market.toUpperCase()}`}
             </span>
           </div>
-          <div className="flex items-center gap-2 rounded-lg bg-elevated/50 px-2.5 py-1.5 border border-border/40">
-            <span className="text-muted text-[11px] shrink-0">📡 涨跌广度:</span>
+          <div className="flex items-center gap-2 rounded-xl bg-[#0e1d35]/80 px-3 py-2 border border-cyan-500/25 shadow-inner">
+            <span className="text-cyan-300/80 text-[11px] font-medium shrink-0">📡 涨跌广度:</span>
             <span className="font-mono text-muted truncate">
-              <span className="text-bull font-semibold">{data.breadth.up} 涨</span> / <span className="text-bear font-semibold">{data.breadth.down} 跌</span> {isCn && `(涨停${data.limit?.limit_up ?? 0}家)`}
+              <span className="text-bull font-bold drop-shadow-[0_0_6px_rgba(255,59,83,0.3)]">{data.breadth.up} 涨</span> / <span className="text-bear font-bold drop-shadow-[0_0_6px_rgba(0,230,118,0.3)]">{data.breadth.down} 跌</span> {isCn && `(涨停${data.limit?.limit_up ?? 0}家)`}
             </span>
           </div>
         </div>
@@ -831,7 +832,7 @@ export function Dashboard() {
 
       {/* 🚀 9:25 早盘竞价抢筹·跳空起爆精选栏 (高开突破置顶，早盘重点盯盘) */}
       {isCn && (auctionQuery.data?.rows?.length ?? 0) > 0 && (
-        <div className="mb-2 rounded-xl border border-orange-500/35 bg-gradient-to-r from-orange-500/15 via-surface/90 to-purple-950/20 p-2.5 backdrop-blur-md shadow-sm">
+        <div className="mb-2 rounded-xl border border-orange-500/35 bg-gradient-to-r from-orange-500/15 via-surface/90 to-sky-950/20 p-2.5 backdrop-blur-md shadow-sm">
           <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
             <div className="flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500/30 to-red-500/30 text-orange-300 border border-orange-500/40 shadow-[0_0_8px_rgba(249,115,22,0.3)]">
@@ -861,7 +862,7 @@ export function Dashboard() {
                 className={cn(
                   "p-2 rounded-lg border bg-surface/80 hover:bg-surface transition-all cursor-pointer group shadow-sm flex flex-col justify-between hover:scale-[1.01]",
                   stock.is_core_purple
-                    ? "border-purple-500/50 hover:border-purple-500/80 bg-purple-500/[0.06]"
+                    ? "border-sky-500/50 hover:border-sky-500/80 bg-sky-500/[0.06]"
                     : stock.is_gap_jump
                     ? "border-orange-500/50 hover:border-orange-500/80 bg-orange-500/[0.06]"
                     : "border-border hover:border-accent/40"
@@ -871,7 +872,7 @@ export function Dashboard() {
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className={cn(
                       "text-xs font-bold truncate transition-colors",
-                      stock.is_gap_jump ? "text-orange-200 group-hover:text-orange-300" : stock.is_core_purple ? "text-purple-200 group-hover:text-purple-300" : "text-foreground group-hover:text-accent"
+                      stock.is_gap_jump ? "text-orange-200 group-hover:text-orange-300" : stock.is_core_purple ? "text-sky-200 group-hover:text-sky-300" : "text-foreground group-hover:text-accent"
                     )}>
                       {stock.name}
                     </span>
@@ -888,12 +889,12 @@ export function Dashboard() {
                   <span className={cn(
                     "px-1.5 py-0.2 rounded font-bold",
                     stock.is_core_purple
-                      ? "bg-purple-500/20 text-purple-200 border border-purple-500/35"
+                      ? "bg-sky-500/20 text-sky-200 border border-sky-500/35"
                       : stock.is_gap_jump
                       ? "bg-gradient-to-r from-orange-500/25 to-red-500/25 text-orange-200 border border-orange-500/40 font-extrabold"
                       : "bg-elevated text-secondary"
                   )}>
-                    {stock.is_core_purple ? "💜 核心抢筹" : stock.is_gap_jump ? "🚀 爆量跳空" : stock.pattern}
+                    {stock.is_core_purple ? "🔹 核心抢筹" : stock.is_gap_jump ? "🚀 爆量跳空" : stock.pattern}
                   </span>
                   <span className="font-mono text-muted">
                     量比 {stock.bidding_vol_ratio >= 10 ? (stock.bidding_vol_ratio / 100).toFixed(1) : stock.bidding_vol_ratio.toFixed(1)}x

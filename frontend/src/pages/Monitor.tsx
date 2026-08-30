@@ -34,7 +34,7 @@ const SOURCE_BADGE_STYLE: Record<string, string> = {
   strategy: 'bg-amber-400/10 text-amber-400 border-amber-400/20',
   signal:   'bg-accent/10 text-accent border-accent/20',
   price:    'bg-emerald-400/10 text-emerald-400 border-emerald-400/20',
-  market:   'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  market:   'bg-sky-500/10 text-sky-400 border-sky-500/20',
   sector:   'bg-cyan-500/10 text-cyan-700 border-cyan-500/20 dark:text-cyan-300',
 }
 
