@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     zhitu_api_token: str = Field(default="B9B718D3-3FDD-461B-B4C2-A261A3B01702", description="智兔 API Token 证书")
     zhitu_base_url: str = Field(default="https://api.zhituapi.com", description="智兔 API Base URL")
 
+    # TradingView
+    tradingview_proxy: str = Field(default="", description="TradingView HTTP/SOCKS5 代理地址，如 http://127.0.0.1:7890")
+    tradingview_session_id: str = Field(default="", description="TradingView 登录 Session Cookie，可选")
+
     # AI
     ai_provider: str = "openai_compat"
     ai_base_url: str = "https://api.zhaji.dev/v1"
