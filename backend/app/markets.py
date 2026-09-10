@@ -19,6 +19,7 @@ CN_TZ = timezone(timedelta(hours=8))
 MARKET_CN = "cn"
 MARKET_HK = "hk"
 MARKET_US = "us"
+MARKET_CRYPTO = "crypto"
 
 # symbol 后缀 → 市场
 _SUFFIX_MAP = {
@@ -27,10 +28,11 @@ _SUFFIX_MAP = {
     ".BJ": MARKET_CN,
     ".HK": MARKET_HK,
     ".US": MARKET_US,
+    ".CRYPTO": MARKET_CRYPTO,
 }
 
 # 市场列表（管道/API 枚举用）
-ALL_MARKETS = [MARKET_CN, MARKET_HK, MARKET_US]
+ALL_MARKETS = [MARKET_CN, MARKET_HK, MARKET_US, MARKET_CRYPTO]
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,12 @@ _META: dict[str, MarketMeta] = {
         # 美东 9:30-16:00 → 北京 21:30-04:00（夏令时）/ 22:30-05:00（冬令时），取两者并集
         sessions=((dt_time(21, 30), dt_time(4, 0)), (dt_time(22, 30), dt_time(5, 0))),
     ),
+    MARKET_CRYPTO: MarketMeta(
+        market=MARKET_CRYPTO, label="加密货币", exchanges=("CRYPTO", "BINANCE", "COINBASE", "OKX"),
+        t_plus=0, stamp_tax=0.0, stamp_tax_double_sided=False,
+        lot_size=1, price_round=0.0001, has_limit=False, default_limit_pct=None,
+        sessions=((dt_time(0, 0), dt_time(23, 59, 59)),),
+    ),
 }
 
 
@@ -80,7 +88,7 @@ def get_market(market: str) -> MarketMeta:
 
 
 def market_of(symbol: str) -> str:
-    """从 symbol 后缀解析市场。600000.SH → cn，00700.HK → hk，AAPL.US → us。
+    """从 symbol 后缀解析市场。600000.SH → cn，00700.HK → hk，AAPL.US → us，BTCUSDT → crypto。
 
     入参先 strip：带首尾空白的 symbol 会导致 endswith 后缀匹配失败并错误
     兜底（" 600000.SH " 曾被判为 us），且与 normalize_symbol 的行为不一致。
@@ -89,6 +97,19 @@ def market_of(symbol: str) -> str:
     for suffix, market in _SUFFIX_MAP.items():
         if s.endswith(suffix):
             return market
+
+    # 加密货币交易对与交易所判断
+    if ":" in s:
+        prefix = s.split(":")[0]
+        if prefix in ("BINANCE", "COINBASE", "OKX", "BYBIT", "KRAKEN", "KUCOIN", "GATEIO", "BITSTAMP", "CRYPTO"):
+            return MARKET_CRYPTO
+        ticker = s.split(":")[1]
+        if any(ticker.endswith(quote) for quote in ("USDT", "USDC", "BUSD", "USD")) or ticker in ("BTC", "ETH", "SOL", "BNB"):
+            return MARKET_CRYPTO
+
+    if any(s.endswith(quote) for quote in ("USDT", "USDC", "BUSD")) and len(s) >= 6:
+        return MARKET_CRYPTO
+
     # 无后缀兜底: 6/9 开头→沪(A股)，其他数字→深(A股)，字母→美股
     code = s.split(".")[0]
     if code and code[0].isdigit():
@@ -97,7 +118,7 @@ def market_of(symbol: str) -> str:
 
 
 def normalize_symbol(symbol: str) -> str:
-    """把外部常见写法归一化为项目符号。如 hk00700→00700.HK、AAPL→AAPL.US。"""
+    """把外部常见写法归一化为项目符号。如 hk00700→00700.HK、AAPL→AAPL.US、btcusdt→BTCUSDT。"""
     s = symbol.strip().upper()
     if s.startswith("HK"):
         return s[2:].zfill(5) + ".HK"
@@ -107,14 +128,12 @@ def normalize_symbol(symbol: str) -> str:
         code = s[2:]
         if code.isdigit():
             return code + "." + s[:2]
-    if s.endswith((".SH", ".SZ", ".BJ", ".HK", ".US")):
+    if s.endswith((".SH", ".SZ", ".BJ", ".HK", ".US", ".CRYPTO")):
         return s
+    if ":" in s or (any(s.endswith(q) for q in ("USDT", "USDC", "BUSD")) and len(s) >= 6):
+        return s  # 加密货币保持标准大写格式
     if s.isdigit():
         # 纯数字 A 股代码 → 交易所后缀。
-        # 北交所必须先判: 920xxx 与沪市 B 股 900xxx 同以 "9" 开头, 若先走
-        # 6/9 规则会把 920344 错配成 920344.SH。8xxxxx(83/87/88 新三板转板)
-        # 与 4xxxxx(430xxx) 同属北交所, 沪深两市无此号段。
-        # 号段口径与本模块 market_limit_pct 委托的 app.price_limits 保持一致。
         if s.startswith(("920", "8", "4")):
             return s + ".BJ"
         return s + (".SH" if s.startswith(("6", "9")) else ".SZ")
@@ -136,6 +155,8 @@ def _dt_in_session(t: dt_time, session: tuple[dt_time, dt_time]) -> bool:
 
 def is_trading_now(market: str, dt: datetime | None = None) -> bool:
     """当前（北京时间）是否处于该市场交易时段。"""
+    if market == MARKET_CRYPTO:
+        return True
     meta = get_market(market)
     dt = dt or datetime.now(CN_TZ)
     return any(_dt_in_session(dt.time(), s) for s in meta.sessions)
