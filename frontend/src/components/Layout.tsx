@@ -51,6 +51,8 @@ import {
   WifiOff,
   EyeOff,
   ChevronDown,
+  Trophy,
+  Compass,
 } from 'lucide-react'
 import { Logo } from './Logo'
 import { api, type IndexQuote } from '@/lib/api'
@@ -68,7 +70,14 @@ const CORE_INDEXES = [
   { symbol: '000680.SH', name: '科创综指' },
 ] as const
 
-type CoreIndex = (typeof CORE_INDEXES)[number]
+const CRYPTO_INDEXES = [
+  { symbol: 'BTCUSDT', name: 'BTC/USDT' },
+  { symbol: 'ETHUSDT', name: 'ETH/USDT' },
+  { symbol: 'SOLUSDT', name: 'SOL/USDT' },
+  { symbol: 'BNBUSDT', name: 'BNB/USDT' },
+] as const
+
+type CoreIndex = { symbol: string; name: string }
 
 interface NavItemDef {
   to: string
@@ -104,6 +113,7 @@ const NAV_GROUPS: NavCategoryDef[] = [
     category: '市场分析',
     items: [
       { to: '/limit-ladder', label: '连板梯队', icon: Flame },
+      { to: '/longhubang', label: '龙虎榜', icon: Trophy, badge: '资金' },
       { to: '/concept-analysis', label: '概念分析', icon: Layers3 },
       { to: '/industry-analysis', label: '行业分析', icon: Landmark },
       { to: '/financials', label: '财务分析', icon: FileText },
@@ -116,6 +126,7 @@ const NAV_GROUPS: NavCategoryDef[] = [
     items: [
       { to: '/trade-plan', label: '开盘交易面板', icon: Target, badge: '实战' },
       { to: '/tomorrow-catalysts', label: '明天炒什么', icon: Zap, badge: '热' },
+      { to: '/game-theory', label: '博弈分析', icon: Compass, badge: '对手盘' },
       { to: '/auction', label: '竞价抢筹', icon: Zap, badge: '9:25' },
       { to: '/darkpool', label: '暗盘资金', icon: EyeOff, badge: '主力' },
       { to: '/data', label: '数据', icon: Database },
@@ -157,11 +168,11 @@ function indexPctClass(v: number | null | undefined) {
   return n > 0 ? 'text-bull' : 'text-bear'
 }
 
-/** 全局市场切换器（多市场扩展）：A股 / 港股 / 美股 */
+/** 全局市场切换器（多市场扩展）：A股 / 港股 / 美股 / 加密货币 */
 function MarketSwitcher() {
   const { market, setMarket } = useMarket()
-  const opts: [('cn' | 'hk' | 'us'), string][] = [
-    ['cn', 'A股'], ['hk', '港股'], ['us', '美股'],
+  const opts: [('cn' | 'hk' | 'us' | 'crypto'), string][] = [
+    ['cn', 'A股'], ['hk', '港股'], ['us', '美股'], ['crypto', '加密'],
   ]
   return (
     <div className="mt-3 flex items-center h-7 rounded-btn border border-border overflow-hidden">
@@ -169,8 +180,8 @@ function MarketSwitcher() {
         <button
           key={m}
           onClick={() => setMarket(m)}
-          className={`h-full flex-1 px-1.5 text-[11px] font-medium transition-colors cursor-pointer
-            ${market === m ? 'bg-accent/10 text-accent' : 'text-muted hover:text-foreground hover:bg-elevated'}`}
+          className={`h-full flex-1 px-1 text-[11px] font-medium transition-colors cursor-pointer
+            ${market === m ? 'bg-accent/10 text-accent font-semibold' : 'text-muted hover:text-foreground hover:bg-elevated'}`}
         >
           {label}
         </button>
@@ -205,7 +216,7 @@ function SidebarIndexQuotes({ rows, items }: { rows: IndexQuote[] | undefined; i
         return (
           <NavLink
             key={item.symbol}
-            to={`/indices?symbol=${encodeURIComponent(item.symbol)}`}
+            to={item.symbol.includes('USDT') ? '/watchlist' : `/indices?symbol=${encodeURIComponent(item.symbol)}`}
             className="block rounded bg-elevated/60 px-2 py-1.5 transition-colors hover:bg-elevated"
             title={`${item.name} ${item.symbol}`}
           >
@@ -408,8 +419,12 @@ export function Layout() {
   // Free 档监控限制提示: 可手动关闭, 不持久化 (刷新后恢复显示)
   const [dismissFreeHint, setDismissFreeHint] = useState(false)
   const indicesPinned = prefs?.indices_nav_pinned ?? true
-  const sidebarIndexSymbols = prefs?.sidebar_index_symbols ?? CORE_INDEXES.map(p => p.symbol)
-  const sidebarIndexes = CORE_INDEXES.filter(item => sidebarIndexSymbols.includes(item.symbol))
+  const { market } = useMarket()
+  const activeIndexes = market === 'crypto' ? CRYPTO_INDEXES : CORE_INDEXES
+  const sidebarIndexSymbols = market === 'crypto'
+    ? CRYPTO_INDEXES.map(p => p.symbol)
+    : (prefs?.sidebar_index_symbols ?? CORE_INDEXES.map(p => p.symbol))
+  const sidebarIndexes = activeIndexes.filter(item => sidebarIndexSymbols.includes(item.symbol))
   // 卡片数据：固定显示时也拉取（即使实时行情关闭）
   const showSidebarQuotes = indicesPinned || realtimeEnabled
   const { data: sidebarIndexQuotes } = useQuery({

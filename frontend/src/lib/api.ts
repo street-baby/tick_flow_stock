@@ -1736,7 +1736,7 @@ export const api = {
     position_sizing?: 'equal' | 'score_weight' | 'dynamic_full'
     asset_type?: 'stock' | 'etf' | 'index'
     minute_fill?: boolean
-    market?: 'cn' | 'hk' | 'us'
+    market?: 'cn' | 'hk' | 'us' | 'crypto'
   }) =>
     request<StrategyBacktestResult>('/api/backtest/strategy/run', {
       method: 'POST',
@@ -2450,6 +2450,15 @@ export const api = {
       body: JSON.stringify({ target_date, prompt }),
     }),
 
+  catalystSchedulerStatus: () =>
+    request<CatalystSchedulerStatus>('/api/news/status'),
+
+  triggerCatalystNow: (mode: '30min' | '2355' = '30min') =>
+    request<{ status: string; items_count?: number; target_date?: string; updated_at?: string }>(
+      `/api/news/trigger-now?mode=${mode}`,
+      { method: 'POST' }
+    ),
+
   // ===== 9:25 集合竞价抢筹 =====
   auctionScreen: (params?: {
     as_of?: string
@@ -2462,6 +2471,11 @@ export const api = {
     include_star?: boolean
     only_doji?: boolean
     use_realtime?: boolean
+    only_high_winrate?: boolean
+    require_catalyst?: boolean
+    exclude_bear_announcements?: boolean
+    exclude_earnings_bear?: boolean
+    require_earnings_bull?: boolean
   }) => {
     const qs = new URLSearchParams()
     if (params?.as_of) qs.set('as_of', params.as_of)
@@ -2474,9 +2488,22 @@ export const api = {
     if (params?.include_star != null) qs.set('include_star', String(params.include_star))
     if (params?.only_doji != null) qs.set('only_doji', String(params.only_doji))
     if (params?.use_realtime != null) qs.set('use_realtime', String(params.use_realtime))
+    if (params?.only_high_winrate != null) qs.set('only_high_winrate', String(params.only_high_winrate))
+    if (params?.require_catalyst != null) qs.set('require_catalyst', String(params.require_catalyst))
+    if (params?.exclude_bear_announcements != null) qs.set('exclude_bear_announcements', String(params.exclude_bear_announcements))
+    if (params?.exclude_earnings_bear != null) qs.set('exclude_earnings_bear', String(params.exclude_earnings_bear))
+    if (params?.require_earnings_bull != null) qs.set('require_earnings_bull', String(params.require_earnings_bull))
     const s = qs.toString()
     return request<AuctionScreenResult>(`/api/auction/screen${s ? `?${s}` : ''}`)
   },
+
+  getLatestAuctionSnatch: () =>
+    request<LatestAuctionSnatchReport>('/api/auction/latest-ai-snatch'),
+
+  triggerAuctionSnatchAuto: () =>
+    request<{ status: string; message: string }>('/api/auction/trigger-auto-snatch', {
+      method: 'POST',
+    }),
 
   aiAnalyzeAuction: (rows: AuctionStockRow[], as_of?: string) =>
     request<AuctionAIAnalysisResult>('/api/auction/ai-analyze', {
@@ -2577,6 +2604,79 @@ export const api = {
     ),
   tradePlanAiCopilot: () => request<AiCopilotResponse>('/api/trade-plan/ai-copilot'),
   tradePlanTailMarket: () => request<TailMarketResponse>('/api/trade-plan/tail-market'),
+
+  // ===== 龙虎榜数据 =====
+  lhbDaily: () => request<LhbDailyResponse>('/api/lhb/daily'),
+  lhbStockStats: (days: number = 5) => request<LhbStockStat[]>(`/api/lhb/stock-stats?days=${days}`),
+  lhbBranchStats: (days: number = 5) => request<LhbBranchStat[]>(`/api/lhb/branch-stats?days=${days}`),
+  lhbInstitutionStats: (days: number = 5) => request<LhbInstitutionStat[]>(`/api/lhb/institution-stats?days=${days}`),
+  lhbInstitutionDetails: () => request<LhbInstitutionDetail[]>('/api/lhb/institution-details'),
+}
+
+export interface LhbDailyStockItem {
+  symbol: string
+  code: string
+  name: string
+  close: number
+  change_pct: number
+  volume: number
+  amount: number
+  reason_key: string
+  reason_label: string
+  reasons?: string[]
+}
+
+export interface LhbDailyResponse {
+  date: string
+  category_meta: Record<string, string>
+  categories: Record<string, LhbDailyStockItem[]>
+  all_stocks: LhbDailyStockItem[]
+  total_stocks_count: number
+}
+
+export interface LhbStockStat {
+  symbol: string
+  code: string
+  name: string
+  count: number
+  buy_amount: number
+  sell_amount: number
+  net_amount: number
+  buy_seats: number
+  sell_seats: number
+}
+
+export interface LhbBranchStat {
+  branch_name: string
+  count: number
+  buy_amount: number
+  buy_seats: number
+  sell_amount: number
+  sell_seats: number
+  net_amount: number
+  top3_stocks: string[]
+}
+
+export interface LhbInstitutionStat {
+  symbol: string
+  code: string
+  name: string
+  buy_amount: number
+  buy_count: number
+  sell_amount: number
+  sell_count: number
+  net_amount: number
+}
+
+export interface LhbInstitutionDetail {
+  symbol: string
+  code: string
+  name: string
+  date: string
+  buy_amount: number
+  sell_amount: number
+  net_amount: number
+  reason: string
 }
 
 export interface AuctionAIAnalysisItem {
@@ -2593,8 +2693,42 @@ export interface AuctionAIAnalysisResult {
   items: AuctionAIAnalysisItem[]
 }
 
+export interface AICoreStockItem {
+  symbol: string
+  name: string
+  board: string
+  score: number
+  stars: number
+  open_gap_pct: number
+  bidding_amount_wan: number
+  bidding_vol_ratio: number
+  pattern: string
+  gap_reason: string
+  will_limit_up: string
+  limit_up_prob: number
+  capital_5d_flow: string
+  main_intent: string
+  open_tactics: string
+}
+
+export interface LatestAuctionSnatchReport {
+  date: string
+  updated_at: string
+  market_sentiment_summary: string
+  market_temperature: number
+  market_zone: string
+  core_five_stocks: AICoreStockItem[]
+  trap_warnings: string[]
+  other_notable_stocks?: Array<{ symbol: string; name: string; short_comment: string }>
+  stats?: any
+  total_screened?: number
+  screener_rows?: AuctionStockRow[]
+  elapsed_seconds?: number
+}
+
 export interface AuctionStockRow {
   symbol: string
+  code?: string
   name: string
   board: string
   open: number
@@ -2609,13 +2743,39 @@ export interface AuctionStockRow {
   pattern: string
   pattern_type: 'doji' | 'bull_body' | 'bear_body' | 'super_breakout' | 'core_purple' | 'gap_jump'
   is_doji: boolean
+  is_5d_lowest_vol?: boolean
+  is_vol_shrink?: boolean
+  is_5d_lowest_doji?: boolean
+  vol_shrink_ratio?: number
   is_gap_jump?: boolean
   is_super_breakout?: boolean
   is_core_purple?: boolean
+  above_ma20?: boolean
+  is_breakout_20d?: boolean
+  has_bull_announcement?: boolean
+  announcement_title?: string | null
+  has_bear_announcement?: boolean
+  bear_announcement_title?: string | null
+  has_sentiment_catalyst?: boolean
+  sentiment_tag?: string | null
+  has_inst_backing?: boolean
+  inst_net_wan?: number
+  has_earnings_catalyst?: boolean
+  earnings_type?: string
+  earnings_growth?: string
+  earnings_desc?: string
+  is_earnings_bear?: boolean
+  catalyst_summary?: string
+  score: number
+  stars?: number
+  is_top3?: boolean
+  is_top5?: boolean
   test_date?: string
   test_low?: number
   defense_days?: number
-  score: number
+  change_5d_pct?: number
+  amount_5d_avg_wan?: number
+  amount_5d_total_yi?: number
 }
 
 export interface AuctionScreenResult {
@@ -2623,12 +2783,19 @@ export interface AuctionScreenResult {
   t1_date: string
   is_live: boolean
   total: number
+  top3?: AuctionStockRow[]
+  top5?: AuctionStockRow[]
   stats: {
     board_counts: Record<string, number>
     total_bidding_amount_yi: number
     avg_gap_pct: number
     doji_count: number
     core_purple_count?: number
+    announcement_count?: number
+    catalyst_count?: number
+    earnings_bull_count?: number
+    earnings_bear_count?: number
+    five_star_count?: number
   }
   rows: AuctionStockRow[]
   elapsed_ms: number
@@ -2670,6 +2837,22 @@ export interface NewsFlashItem {
   title: string
   content: string
   url?: string
+}
+
+export interface CatalystSchedulerStatus {
+  scheduler_active: boolean
+  timezone?: string
+  beijing_time?: string
+  last_poll_time?: string
+  last_30min_update?: string
+  next_30min_update?: string
+  daily_summary_time: string
+  next_2355_summary?: string
+  is_final_summary_today: boolean
+  today_news_count: number
+  mode: string
+  is_running_task: boolean
+  updated_at: string
 }
 
 // ===== Pipeline =====
@@ -3136,6 +3319,146 @@ export interface TailMarketResponse {
   market_gate: MarketGateInfo
   tail_picks: TailMarketPickItem[]
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 博弈派 AI 分析引擎 (Game Theory Analysis)
+// ═══════════════════════════════════════════════════════════════════
+
+export interface StockGameScore {
+  symbol: string
+  name: string
+  close: number
+  change_pct: number
+  fear_index: number
+  greed_index: number
+  game_signal: 'strong_buy' | 'buy' | 'neutral' | 'caution' | 'danger'
+  vol_shrink_score: number
+  turnover_cold_score: number
+  inst_buy_score: number
+  margin_decrease_score: number
+  hot_rank_cold_score: number
+  xq_cold_score: number
+  ma_breakdown_trap_score?: number
+  kdj_panic_score?: number
+  panic_pinbar_score?: number
+  macd_dead_trap_score?: number
+  bull_trap_score?: number
+  kdj_greed_score?: number
+  breakout_trap_score?: number
+  hot_rank_surge_score: number
+  xq_tweet_surge_score: number
+  turnover_hot_score: number
+  margin_increase_score: number
+  inst_sell_score: number
+  vol_spike_no_gain_score: number
+  signal_reasons: string[]
+  hot_rank: number
+  xq_follow: number
+  xq_tweet: number
+  inst_net_amount: number
+  margin_change_pct: number
+  turnover_rate: number
+  vol_ratio_5d: number
+  attention_index: number
+  inst_participation: number
+  amount?: number
+  amplitude?: number
+  kdj_j?: number
+  rsi_6?: number
+  macd_hist?: number
+}
+
+export interface MarketTemperature {
+  temperature: number
+  zone: 'ice' | 'cold' | 'warm' | 'hot' | 'boiling'
+  zone_label: string
+  limit_up_score: number
+  consecutive_score: number
+  margin_score: number
+  lhb_inst_score: number
+  crowd_score: number
+  limit_up_count: number
+  limit_down_count: number
+  seal_rate: number
+  max_consecutive: number
+  margin_total: number
+  margin_change: number
+  inst_net_total: number
+  date: string
+  updated_at: string
+}
+
+export interface GameTheoryReport {
+  date: string
+  market_summary: string
+  strategy_advice: string
+  fear_pool: StockGameScore[]
+  danger_list: StockGameScore[]
+  temperature: number
+  zone: string
+  updated_at: string
+}
+
+export interface GameTheoryStatus {
+  is_running: boolean
+  last_run_time: string
+  temperature: number | null
+  zone: string | null
+  zone_label: string | null
+  fear_pool_count: number
+  danger_list_count: number
+  total_scored: number
+  beijing_time: string
+}
+
+export async function fetchGameTheoryTemperature(): Promise<MarketTemperature> {
+  const res = await fetch('/api/game-theory/temperature')
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchGameTheoryFearPool(limit: number = 20): Promise<StockGameScore[]> {
+  const res = await fetch(`/api/game-theory/fear-pool?limit=${limit}`)
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchGameTheoryDangerList(limit: number = 20): Promise<StockGameScore[]> {
+  const res = await fetch(`/api/game-theory/danger-list?limit=${limit}`)
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchGameTheoryStock(symbol: string): Promise<StockGameScore> {
+  const res = await fetch(`/api/game-theory/stock/${encodeURIComponent(symbol)}`)
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchGameTheoryReport(): Promise<GameTheoryReport> {
+  const res = await fetch('/api/game-theory/report')
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchGameTheoryHistory(days: number = 30): Promise<MarketTemperature[]> {
+  const res = await fetch(`/api/game-theory/history?days=${days}`)
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchGameTheoryStatus(): Promise<GameTheoryStatus> {
+  const res = await fetch('/api/game-theory/status')
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
+export async function triggerGameTheoryAnalysis(): Promise<{ status: string; message: string }> {
+  const res = await fetch('/api/game-theory/trigger', { method: 'POST' })
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+  return res.json()
+}
+
 
 
 

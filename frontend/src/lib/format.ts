@@ -2,6 +2,11 @@
 
 export function fmtPrice(v: number | null | undefined, digits = 2): string {
   if (v == null || Number.isNaN(v)) return '—'
+  if (v === 0) return '0.00'
+  const abs = Math.abs(v)
+  if (abs < 0.0001) return v.toFixed(6)
+  if (abs < 0.01) return v.toFixed(5)
+  if (abs < 1) return v.toFixed(4)
   return v.toFixed(digits)
 }
 

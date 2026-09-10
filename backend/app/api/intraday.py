@@ -94,29 +94,128 @@ def status(request: Request):
             "quote_age_ms": None, "is_trading_hours": False, "last_fetch_ms": None}
 
 
+import threading
+
+_index_cache: dict[str, tuple[float, list[dict]]] = {}
+_index_cache_lock = threading.Lock()
+
+
 @router.get("/indices")
 def index_quotes(
     request: Request,
     symbols: str | None = Query(None, description="逗号分隔的指数 symbol 列表"),
 ):
-    """返回实时指数行情缓存，优先使用实时源。"""
+    """返回实时指数行情缓存，优先使用实时源，带 3s 内存微缓存。"""
+    cache_key = symbols or "default"
+    now_ts = time.time()
+    with _index_cache_lock:
+        if cache_key in _index_cache:
+            ts, cached_rows = _index_cache[cache_key]
+            if now_ts - ts < 3.0 and cached_rows:
+                return {"rows": cached_rows, "count": len(cached_rows), "source": "cache"}
+
     symbol_list = [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None
+
+    # 加密货币与美股指数/核心标的：由 TradingView 插件实时提供
+    if symbol_list and any("USDT" in s or s.endswith(".US") for s in symbol_list):
+        from app.plugins.tradingview.quotes import get_batch_quotes
+        tv_quotes = get_batch_quotes(symbol_list)
+        rows = [
+            {
+                "symbol": q["symbol"],
+                "name": q["name"],
+                "close": q["close"],
+                "last_price": q["close"],
+                "change_pct": round(q["change_pct"] * 100.0, 4),
+                "change_amount": q["change_amount"],
+                "volume": q["volume"],
+            }
+            for q in tv_quotes
+        ]
+        with _index_cache_lock:
+            _index_cache[cache_key] = (now_ts, rows)
+        return {"rows": rows, "count": len(rows), "source": "tradingview"}
+
     qs = _get_quote_service(request)
     if qs:
         df = qs.get_index_quotes(symbol_list)
         if not df.is_empty():
-            return {"rows": df.to_dicts(), "count": len(df), "source": "realtime"}
+            rows = df.to_dicts()
+            with _index_cache_lock:
+                _index_cache[cache_key] = (now_ts, rows)
+            return {"rows": rows, "count": len(df), "source": "realtime"}
 
-    # 1. 优先从智兔数服 (Zhitu) 获取即时行情
+    # 1. 优先使用极速秒级实时指数源 (毫秒级响应)
     try:
-        from app.data_providers import custom as custom_sources
-        provider = custom_sources.get_provider("zhitu")
-        if provider and hasattr(provider, "get_index_quotes"):
-            rows = provider.get_index_quotes(symbol_list or ["000001.SH", "399001.SZ", "399006.SZ", "000680.SH", "000688.SH", "000300.SH"])
-            if rows:
-                return {"rows": rows, "count": len(rows), "source": "zhitu"}
+        import httpx
+        from app.market_time import cn_now
+
+        now_str = cn_now().strftime("%Y-%m-%d")
+        sina_map = {
+            "000001.SH": "s_sh000001",
+            "399001.SZ": "s_sz399001",
+            "399006.SZ": "s_sz399006",
+            "000680.SH": "s_sh000680",
+            "000688.SH": "s_sh000688",
+            "000300.SH": "s_sh000300",
+            "000016.SH": "s_sh000016",
+            "000905.SH": "s_sh000905",
+            "399005.SZ": "s_sz399005",
+            "000002.SH": "s_sh000002",
+            "000003.SH": "s_sh000003",
+            "000004.SH": "s_sh000004",
+            "000005.SH": "s_sh000005",
+            "000006.SH": "s_sh000006",
+            "000007.SH": "s_sh000007",
+            "000008.SH": "s_sh000008",
+            "000009.SH": "s_sh000009",
+            "000010.SH": "s_sh000010",
+        }
+        req_symbols = symbol_list if symbol_list else list(sina_map.keys())
+        sina_keys = [sina_map[s] for s in req_symbols if s in sina_map]
+        if sina_keys:
+            url = f"http://hq.sinajs.cn/list={','.join(sina_keys)}"
+            resp = httpx.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=1.5)
+            if resp.status_code == 200:
+                rows: list[dict] = []
+                sym_by_sina = {v: k for k, v in sina_map.items()}
+                for line in resp.text.splitlines():
+                    if '="' not in line:
+                        continue
+                    k_part, v_part = line.split('="', 1)
+                    var_name = k_part.replace("var hq_str_", "").strip()
+                    val_str = v_part.rstrip('";').strip()
+                    if not val_str:
+                        continue
+                    parts = val_str.split(",")
+                    if len(parts) >= 6:
+                        name = parts[0]
+                        price = float(parts[1])
+                        change_amt = float(parts[2])
+                        change_pct = float(parts[3])
+                        vol = float(parts[4])
+                        amt = float(parts[5]) * 10000.0
+                        prev_close = price - change_amt
+                        orig_sym = sym_by_sina.get(var_name, var_name)
+                        rows.append({
+                            "symbol": orig_sym,
+                            "name": name,
+                            "date": now_str,
+                            "last_price": price,
+                            "close": price,
+                            "prev_close": prev_close,
+                            "change_amount": change_amt,
+                            "change_pct": change_pct,
+                            "volume": vol,
+                            "amount": amt,
+                            "source": "live_realtime",
+                        })
+                if rows:
+                    with _index_cache_lock:
+                        _index_cache[cache_key] = (now_ts, rows)
+                    return {"rows": rows, "count": len(rows), "source": "live_realtime"}
     except Exception as e:
-        logger.debug("智兔指数实时行情获取异常: %s", e)
+        logger.debug("即时实时指数拉取失败: %s", e)
 
     # 2. 在线备选实时源获取指数即时行情
     try:
@@ -148,7 +247,7 @@ def index_quotes(
         sina_keys = [sina_map[s] for s in req_symbols if s in sina_map]
         if sina_keys:
             url = f"http://hq.sinajs.cn/list={','.join(sina_keys)}"
-            resp = httpx.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=3.0)
+            resp = httpx.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=1.5)
             if resp.status_code == 200:
                 rows: list[dict] = []
                 # 解析: var hq_str_s_sh000001="上证指数,3906.1151,11.6927,0.30,2816737,57693833";

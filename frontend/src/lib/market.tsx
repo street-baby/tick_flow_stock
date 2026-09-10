@@ -3,9 +3,9 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import { storage } from '@/lib/storage'
 
-export type Market = 'cn' | 'hk' | 'us'
+export type Market = 'cn' | 'hk' | 'us' | 'crypto'
 
-const MARKET_LABELS: Record<Market, string> = { cn: 'A股', hk: '港股', us: '美股' }
+const MARKET_LABELS: Record<Market, string> = { cn: 'A股', hk: '港股', us: '美股', crypto: '加密货币' }
 
 interface MarketCtx {
   market: Market

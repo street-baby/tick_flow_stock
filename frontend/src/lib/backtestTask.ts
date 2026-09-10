@@ -182,7 +182,7 @@ export function startBacktest(params: {
   asset_type?: 'stock' | 'etf'
   minute_fill?: boolean
   regime_filter?: { states?: string[]; min_score?: number } | null
-  market?: 'cn' | 'hk' | 'us'
+  market?: 'cn' | 'hk' | 'us' | 'crypto'
 }): void {
   // 取消之前的任务状态
   if (eventSource) {
