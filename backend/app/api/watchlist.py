@@ -48,13 +48,24 @@ def _with_names(rows: list[dict], request: Request) -> list[dict]:
         return rows
     try:
         # 股票 + ETF 名称统一由 repo.get_name_map 解析, 自选列表可混合持有
-        name_by_symbol = request.app.state.repo.get_name_map([r.get("symbol") for r in rows])
-        if not name_by_symbol:
-            return rows
-        return [{**row, "name": name_by_symbol.get(row.get("symbol"))} for row in rows]
+        name_by_symbol = request.app.state.repo.get_name_map([r.get("symbol") for r in rows]) or {}
     except Exception as e:  # noqa: BLE001
         logger.debug("attach watchlist names failed: %s", e)
-        return rows
+        name_by_symbol = {}
+
+    from app.markets import MARKET_CRYPTO, MARKET_US, market_of
+    out = []
+    for row in rows:
+        sym = row.get("symbol", "")
+        name = name_by_symbol.get(sym)
+        if not name:
+            m = market_of(sym)
+            if m == MARKET_CRYPTO:
+                name = sym.replace("USDT", "/USDT")
+            elif m == MARKET_US:
+                name = sym.replace(".US", "")
+        out.append({**row, "name": name or sym})
+    return out
 
 
 @router.get("")
@@ -315,12 +326,43 @@ def watchlist_enriched(
             for c in float_cols
         ])
 
+    # 严格按 symbol 去重，防止底层缓存或扩展表 JOIN 时产生多行
+    df = df.unique(subset=["symbol"], keep="first")
+
     # 按自选添加顺序（新加的在前）重排行
     order_map = {s: i for i, s in enumerate(symbols)}
     df = df.with_columns(pl.col("symbol").map_elements(lambda s: order_map.get(s, len(symbols)), return_dtype=pl.Int32).alias("_sort_order"))
     df = df.sort("_sort_order").drop("_sort_order")
 
     rows = df.to_dicts()
+
+    # 填补美股与加密货币的实时报价
+    from app.markets import MARKET_CRYPTO, MARKET_US, market_of
+    tv_symbols = [r["symbol"] for r in rows if market_of(r.get("symbol")) in (MARKET_US, MARKET_CRYPTO)]
+    if tv_symbols:
+        from app.plugins.tradingview.quotes import get_batch_quotes
+        try:
+            quotes = get_batch_quotes(tv_symbols)
+            quotes_map = {q["symbol"]: q for q in quotes}
+            for r in rows:
+                sym = r.get("symbol")
+                if sym in quotes_map:
+                    q = quotes_map[sym]
+                    r["close"] = q.get("close")
+                    r["change_pct"] = q.get("change_pct")
+                    r["change_amount"] = q.get("change_amount")
+                    r["volume"] = q.get("volume")
+                    r["amount"] = (q.get("volume", 0.0) or 0.0) * (q.get("close", 0.0) or 0.0)
+                    if not r.get("name") or r["name"] == sym:
+                        r["name"] = q.get("name") or sym
+                    r["asset_type"] = q.get("asset_type", "stock")
+                    r["market"] = q.get("market")
+        except Exception as e:
+            logger.warning("自选股美股/加密货币报价刷新失败: %s", e)
+
+    if not as_of and tv_symbols:
+        as_of = date.today()
+
     elapsed = (time.perf_counter() - t0) * 1000
     return {"rows": rows, "as_of": str(as_of) if as_of else None, "elapsed_ms": elapsed}
 

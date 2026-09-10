@@ -1,6 +1,7 @@
 """K 线 / 同步 API。"""
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from datetime import date, timedelta
@@ -111,12 +112,26 @@ def search_instruments(
             (pl.col("code").cast(pl.Utf8) if "code" in df_t.columns else pl.lit("")).alias("code"),
             pl.lit(t).alias("asset_type"),
         ]).select(["symbol", "name", "code", "asset_type"]))
-    if not parts:
-        return {"results": []}
-    df = pl.concat(parts, how="vertical")
-
     keyword = q.strip().upper()
     is_pinyin_query = keyword.isalpha() and keyword.isascii()
+
+    if not parts:
+        if keyword:
+            try:
+                from app.plugins.tradingview.quotes import search_symbols
+                tv_results = search_symbols(keyword, limit=min(limit, 8))
+                return {"results": [
+                    {
+                        "symbol": tr["symbol"],
+                        "name": tr["name"],
+                        "code": tr["code"],
+                        "asset_type": tr.get("asset_type", "stock"),
+                    }
+                    for tr in tv_results
+                ]}
+            except Exception as e:
+                logger.debug("TradingView 标的搜索补充失败: %s", e)
+        return {"results": []}
 
     # code/symbol 前缀优先，再 name 包含匹配
     prefix_mask = (
@@ -162,6 +177,27 @@ def search_instruments(
             else (collected[0] if collected else df.head(0))
         )
     rows = matched.select(["symbol", "name", "code", "asset_type"]).to_dicts()
+
+    # 如果有纯字母/USDT/美股特征，或本地搜索结果不足，尝试通过 TradingView 补充美股和加密货币
+    if len(rows) < limit and keyword and (is_pinyin_query or "USDT" in keyword or "." in keyword or len(rows) == 0):
+        try:
+            from app.plugins.tradingview.quotes import search_symbols
+            tv_results = search_symbols(keyword, limit=min(limit - len(rows), 8))
+            seen_symbols = {r["symbol"] for r in rows}
+            for tr in tv_results:
+                if tr["symbol"] not in seen_symbols:
+                    rows.append({
+                        "symbol": tr["symbol"],
+                        "name": tr["name"],
+                        "code": tr["code"],
+                        "asset_type": tr.get("asset_type", "stock"),
+                    })
+                    seen_symbols.add(tr["symbol"])
+                    if len(rows) >= limit:
+                        break
+        except Exception as e:
+            logger.debug("TradingView 标的搜索补充失败: %s", e)
+
     return {"results": rows}
 
 
@@ -695,6 +731,10 @@ def get_minute(
     stock_info = _get_stock_info(repo, symbol) if asset_type == "stock" else _get_asset_info(repo, symbol, asset_type)
     stock_name = stock_info.get("name")
 
+    if trade_date is not None and trade_date.weekday() >= 5:
+        # 传入日期为周六或周日，非交易日回退到周五
+        trade_date = trade_date - timedelta(days=trade_date.weekday() - 4)
+
     if trade_date is None:
         # 默认看今天, 而不是本地落盘的最近日 (盘中后者是昨天)。
         # 非交易日(周末/节假日)才回退到本地最近有数据的交易日。
@@ -715,7 +755,7 @@ def get_minute(
         else:
             trade_date = today
     if trade_date is None:
-        # 本地无任何分钟K，尝试从 TickFlow 拉取当天
+        # 本地无任何分钟K，尝试拉取当天
         trade_date = cn_today()
         df = kline_sync.fetch_minute_single(symbol, trade_date, asset_type=asset_type)
         price_limit = _get_price_limit_info(
@@ -760,8 +800,22 @@ def get_minute(
             "price_limit": price_limit,
         }
 
-    # 本地不完整或无数据 → 从 TickFlow 实时拉取
+    # 本地不完整或无数据 → 实时拉取
     live_df = kline_sync.fetch_minute_single(symbol, trade_date, asset_type=asset_type)
+    if live_df.is_empty():
+        # 若指定日期无分钟数据(例如非交易日/节假日)，尝试回退到最近有数据的交易日
+        recent = repo.latest_minute_date(symbol, asset_type=asset_type) or repo.latest_daily_date()
+        if recent and recent != trade_date:
+            fallback_df = repo.get_minute(symbol, recent, asset_type=asset_type)
+            if fallback_df.is_empty():
+                fallback_df = kline_sync.fetch_minute_single(symbol, recent, asset_type=asset_type)
+            if not fallback_df.is_empty():
+                trade_date = recent
+                live_df = fallback_df
+                price_limit = _get_price_limit_info(
+                    repo, symbol, trade_date, asset_type, stock_name,
+                )
+
     return {
         "symbol": symbol, "name": stock_name, "stock_info": stock_info,
         "date": str(trade_date), "rows": live_df.to_dicts(),
