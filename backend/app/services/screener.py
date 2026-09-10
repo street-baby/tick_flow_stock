@@ -487,9 +487,12 @@ class ScreenerService:
         )
 
     def latest_date(self) -> date | None:
-        """最新 enriched 日期。港美股读市场独立目录。"""
+        """最新 enriched 日期。港美股读市场独立目录，加密货币取当日。"""
+        if self.market == "crypto":
+            return date.today()
         if self.market in ("hk", "us"):
-            return self.repo.latest_enriched_date_market(self.market)
+            d = self.repo.latest_enriched_date_market(self.market)
+            return d or (date.today() if self.market == "us" else None)
         if self.asset_type != "stock":
             _, d = self.repo.get_enriched_latest_asset(self.asset_type)
             return d

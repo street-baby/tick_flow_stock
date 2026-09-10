@@ -22,6 +22,9 @@ US_PRESETS: list[dict[str, Any]] = [
         "description": "日涨幅 > 3%，相对放量 > 1.5 倍，收盘站上 MA20，市值 > 10 亿美元",
         "market": "us",
         "tags": ["美股", "放量突破", "动量", "MA20"],
+        "asset_types": ["stock"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "us_megacap_leaders",
@@ -29,6 +32,9 @@ US_PRESETS: list[dict[str, Any]] = [
         "description": "市值 > 1000 亿美元，MA20 > MA50 均线多头排列，高流动性蓝筹",
         "market": "us",
         "tags": ["美股", "千亿蓝筹", "均线多头", "核心资产"],
+        "asset_types": ["stock"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "us_rsi_oversold",
@@ -36,6 +42,9 @@ US_PRESETS: list[dict[str, Any]] = [
         "description": "RSI(14) < 35 极度超卖区，今日收红盘阳线，寻找超跌反弹",
         "market": "us",
         "tags": ["美股", "RSI超卖", "抄底", "反弹"],
+        "asset_types": ["stock"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "us_macd_cross",
@@ -43,6 +52,9 @@ US_PRESETS: list[dict[str, Any]] = [
         "description": "日线 MACD 上穿 Signal 信号线，短期动能转强",
         "market": "us",
         "tags": ["美股", "MACD金叉", "动能突破"],
+        "asset_types": ["stock"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "us_strong_buy",
@@ -50,6 +62,9 @@ US_PRESETS: list[dict[str, Any]] = [
         "description": "TradingView 云端综合多指标评分评级为 Strong Buy",
         "market": "us",
         "tags": ["美股", "TradingView评级", "强力买入"],
+        "asset_types": ["stock"],
+        "timeframes": ["1d"],
+        "params": [],
     },
 ]
 
@@ -60,6 +75,9 @@ CRYPTO_PRESETS: list[dict[str, Any]] = [
         "description": "24 小时涨幅 > 5%，24 小时成交量充沛，主力资金活跃",
         "market": "crypto",
         "tags": ["加密货币", "24H涨幅榜", "主力异动", "动量"],
+        "asset_types": ["stock", "crypto"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "crypto_major_leaders",
@@ -67,6 +85,9 @@ CRYPTO_PRESETS: list[dict[str, Any]] = [
         "description": "BTC/ETH/SOL 等主流百大币种，流动性充沛，按成交活跃度排序",
         "market": "crypto",
         "tags": ["加密货币", "主流币", "高流动性", "现货主力"],
+        "asset_types": ["stock", "crypto"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "crypto_volume_breakout",
@@ -74,6 +95,9 @@ CRYPTO_PRESETS: list[dict[str, Any]] = [
         "description": "相对成交量激增 1.8 倍以上，24H 涨幅 > 2%，平台向上突破",
         "market": "crypto",
         "tags": ["加密货币", "放量突破", "异动突破"],
+        "asset_types": ["stock", "crypto"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "crypto_rsi_oversold",
@@ -81,6 +105,9 @@ CRYPTO_PRESETS: list[dict[str, Any]] = [
         "description": "RSI(14) < 32 极度超卖区，博弈超跌反弹修复",
         "market": "crypto",
         "tags": ["加密货币", "RSI超卖", "超跌抄底"],
+        "asset_types": ["stock", "crypto"],
+        "timeframes": ["1d"],
+        "params": [],
     },
     {
         "id": "crypto_golden_cross",
@@ -88,6 +115,9 @@ CRYPTO_PRESETS: list[dict[str, Any]] = [
         "description": "日线 MACD 上穿信号线，短期趋势多头走强",
         "market": "crypto",
         "tags": ["加密货币", "MACD金叉", "多头共振"],
+        "asset_types": ["stock", "crypto"],
+        "timeframes": ["1d"],
+        "params": [],
     },
 ]
 

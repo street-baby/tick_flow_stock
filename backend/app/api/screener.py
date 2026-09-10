@@ -241,8 +241,10 @@ def _update_cache_strategy(data_dir, as_of: str, strategy_id: str, safe_data: di
     """单跑后更新缓存中该策略的结果，保持缓存与最新计算一致。"""
     from app.services import strategy_cache
     cached = strategy_cache.read_cache(data_dir, market)
-    if cached and cached.get("as_of") == as_of:
-        results = cached.get("results", {})
+    if cached is None:
+        cached = {"as_of": as_of, "results": {}, "updated_at": int(time.time() * 1000)}
+    if cached.get("as_of") == as_of or not cached.get("results"):
+        results = dict(cached.get("results") or {})
         results[strategy_id] = {
             "total": safe_data.get("total", 0),
             "as_of": as_of,
@@ -256,9 +258,15 @@ def strategies(
     request: Request,
     asset_type: str = Query("stock"),
     timeframe: str = Query("1d"),
-    market: str = Query("cn", description="cn|hk|us"),
+    market: str = Query("cn", description="cn|hk|us|crypto"),
 ):
-    """兼容策略清单端点；唯一数据源为 StrategyEngine。"""
+    """兼容策略清单端点；美股与加密货币接入 TradingView 专属预设，其余走 StrategyEngine。"""
+    market = str(market or "cn").lower()
+    if market in ("us", "crypto"):
+        from app.plugins.tradingview.screener import get_presets_for_market
+        presets = get_presets_for_market(market)
+        return {"presets": presets, "load_errors": []}
+
     data_dir = request.app.state.repo.store.data_dir
     engine = getattr(request.app.state, "strategy_engine", None)
     if engine is None:
@@ -302,8 +310,105 @@ def run_custom(req: CustomRequest, request: Request):
     return _result_with_ext(safe_data, ext_values)
 
 
+def _enrich_bowl_rebound_rows(rows: list[dict], params: dict | None = None) -> list[dict]:
+    """为碗口反弹策略结果补充『碗口形态分类』与『B1完美图形相似度』。"""
+    if not rows:
+        return rows
+    from app.strategy.pattern.b1_matcher import B1PatternMatcher
+    matcher = B1PatternMatcher()
+    params = params or {}
+    min_sim = float(params.get("min_b1_similarity", 0.0))
+    cat_filter = str(params.get("category_filter", "all"))
+
+    enriched_rows = []
+    for r in rows:
+        close = float(r.get("close") or 0.0)
+        ma5 = float(r.get("ma5") or close)
+        ma10 = float(r.get("ma10") or close)
+        ma20 = float(r.get("ma20") or close)
+        ma30 = float(r.get("ma30") or close)
+        bull_bear = (ma5 + ma10 + ma20 + ma30) / 4.0 if (ma5 and ma10 and ma20 and ma30) else close
+        short_trend = float(r.get("ema10") or ma10)
+
+        # 碗口三档位置判定
+        if short_trend >= close >= bull_bear:
+            category = "🥣 回落碗中"
+            cat_key = "bowl_center"
+        elif abs(close - bull_bear) <= bull_bear * 0.03:
+            category = "📊 靠近多空线"
+            cat_key = "near_duokong"
+        else:
+            category = "📈 靠近短期线"
+            cat_key = "near_short_trend"
+
+        if cat_filter != "all" and cat_filter != cat_key:
+            continue
+
+        # 构造特征向量比对 B1 标杆案例
+        feats = {
+            "trend_structure": {
+                "short_vs_bullbear": round(short_trend / (bull_bear + 1e-6), 3),
+                "short_slope": round((short_trend / (ma20 + 1e-6) - 1.0) * 100.0, 2),
+                "bullbear_slope": 1.0,
+                "price_vs_short_pct": round((close - short_trend) / (short_trend + 1e-6) * 100.0, 2),
+                "price_vs_bullbear_pct": round((close - bull_bear) / (bull_bear + 1e-6) * 100.0, 2),
+                "is_in_bowl": (short_trend >= close >= bull_bear),
+                "trend_spread_pct": round((short_trend - bull_bear) / (bull_bear + 1e-6) * 100.0, 2),
+                "price_bias_pct": round((close - (short_trend + bull_bear) / 2.0) / ((short_trend + bull_bear) / 2.0 + 1e-6) * 100.0, 2),
+            },
+            "kdj_state": {
+                "j_value": float(r.get("kdj_j") if r.get("kdj_j") is not None else 10.0),
+                "j_position": "低位" if float(r.get("kdj_j") or 10.0) <= 20.0 else "中位",
+                "k_cross_d": True,
+                "j_trend": 1.5,
+            },
+            "volume_pattern": {
+                "avg_volume_ratio": float(r.get("vol_ratio_5d") or 1.0),
+                "volume_trend": "缩量后放量" if float(r.get("vol_ratio_5d") or 1.0) > 1.2 else "量能平稳",
+                "shrink_then_expand": True,
+                "max_volume_ratio": 3.0,
+            },
+            "price_shape": {
+                "max_drawdown": 7.5,
+                "breakout_strength": float(r.get("change_pct") or 0.0),
+                "overall_trend": "震荡",
+            },
+        }
+        b1_res = matcher.evaluate_candidate(feats)
+        sim_score = b1_res["similarity"]
+        if sim_score < min_sim:
+            continue
+
+        r["bowl_category"] = category
+        r["b1_similarity"] = sim_score
+        r["b1_matched_case"] = f"{b1_res['matched_case_name']} ({b1_res['matched_case_code']})"
+        r["b1_desc"] = b1_res["matched_case_desc"]
+        r["b1_breakdown"] = b1_res["breakdown"]
+        # 将相似度纳入排序综合得分
+        r["score"] = round(float(r.get("score") or 0.0) * 0.4 + sim_score * 0.6, 1)
+        enriched_rows.append(r)
+
+    enriched_rows.sort(key=lambda x: x.get("b1_similarity", 0), reverse=True)
+    return enriched_rows
+
+
 @router.post("/run_preset")
 def run_preset(req: PresetRequest, request: Request):
+    market = str(req.market or "cn").lower()
+    if market in ("us", "crypto"):
+        from app.plugins.tradingview.screener import run_preset_scanner
+        try:
+            res = run_preset_scanner(market, req.strategy_id, limit=50)
+        except Exception as e:
+            logger.warning("运行 TradingView %s 预设 %s 失败: %s", market, req.strategy_id, e)
+            raise HTTPException(status_code=500, detail=f"TradingView 扫描失败: {e}") from e
+
+        data_dir = request.app.state.repo.store.data_dir
+        as_of_str = str(res.get("as_of") or date.today().isoformat())
+        _update_cache_strategy(data_dir, as_of_str, req.strategy_id, res, market)
+        ext_values = _load_ext_value_maps(request.app.state.repo, req.ext_columns)
+        return _result_with_ext(res, ext_values)
+
     repo = request.app.state.repo
     svc = ScreenerService(repo, asset_type=req.asset_type, market=req.market)
     as_of = req.as_of or svc.latest_date()
@@ -347,6 +452,10 @@ def run_preset(req: PresetRequest, request: Request):
         raise HTTPException(status_code=status_code, detail=str(e)) from e
 
     safe_data = _safe(asdict(result))
+    if req.strategy_id == "bowl_rebound" and isinstance(safe_data.get("rows"), list):
+        safe_data["rows"] = _enrich_bowl_rebound_rows(safe_data["rows"], params)
+        safe_data["total"] = len(safe_data["rows"])
+
     _update_cache_strategy(data_dir, str(as_of), req.strategy_id, safe_data, req.market)
 
     return _result_with_ext(safe_data, ext_values)
@@ -452,10 +561,26 @@ def get_cached_result(
     market: str = Query("cn", description="cn|hk|us"),
 ):
     """按需返回单个策略的完整明细及其今日失效行。"""
-    market = str(market) or "cn"
+    market = str(market or "cn").lower()
     cached = _cached_with_realtime(request, market)
     raw_result = (cached.get("results") or {}).get(strategy_id)
     if not isinstance(raw_result, dict):
+        if market in ("us", "crypto"):
+            from app.plugins.tradingview.screener import run_preset_scanner
+            try:
+                res = run_preset_scanner(market, strategy_id, limit=50)
+                data_dir = request.app.state.repo.store.data_dir
+                as_of_str = str(res.get("as_of") or date.today().isoformat())
+                _update_cache_strategy(data_dir, as_of_str, strategy_id, res, market)
+                ext_values = _load_ext_value_maps(request.app.state.repo, ext_columns)
+                return {
+                    "result": _result_with_ext(res, ext_values),
+                    "today_ever_rows": None,
+                    "strategy_ids_by_symbol": {r["symbol"]: [strategy_id] for r in res.get("rows", []) if isinstance(r, dict) and "symbol" in r},
+                    "updated_at": int(time.time() * 1000),
+                }
+            except Exception as e:
+                logger.warning("即时获取 TradingView 策略 %s 失败: %s", strategy_id, e)
         return {
             "result": None,
             "today_ever_rows": None,
@@ -553,7 +678,46 @@ def run_all(request: Request, body: Optional[dict] = None):
     # 多市场: 前端一直在请求体里发 market, 但此处此前从未读取 —— 切到港股跑全部
     # 策略实际返回的是 A 股结果。必须传入 ScreenerService, 否则 enriched 目录
     # 与最新日期都会落到 A 股。
-    market = str(body.get("market") or "cn")
+    market = str(body.get("market") or "cn").lower()
+    if market in ("us", "crypto"):
+        from app.plugins.tradingview.screener import get_presets_for_market, run_preset_scanner
+        data_dir = request.app.state.repo.store.data_dir
+        presets = get_presets_for_market(market)
+        preset_ids = [p["id"] for p in presets]
+        requested_ids = body.get("strategy_ids")
+        target_ids = [sid for sid in (requested_ids or preset_ids) if sid in preset_ids]
+
+        results = {}
+        today_str = date.today().isoformat()
+        for sid in target_ids:
+            try:
+                res = run_preset_scanner(market, sid, limit=50)
+                results[sid] = {
+                    "total": res.get("total", 0),
+                    "as_of": res.get("as_of", today_str),
+                    "rows": res.get("rows", []),
+                }
+            except Exception as e:
+                logger.warning("运行 TradingView %s 预设 %s 失败: %s", market, sid, e)
+                results[sid] = {"total": 0, "as_of": today_str, "rows": []}
+
+        strategy_cache.write_cache(data_dir, today_str, results, market)
+        summary_only = bool(body.get("summary_only", False))
+        if summary_only:
+            return {
+                "as_of": today_str,
+                "results": {
+                    sid: {"total": r["total"], "as_of": r["as_of"]}
+                    for sid, r in results.items()
+                },
+                "elapsed_ms": round((time.perf_counter() - t_total) * 1000, 1),
+            }
+        return {
+            "as_of": today_str,
+            "results": results,
+            "elapsed_ms": round((time.perf_counter() - t_total) * 1000, 1),
+        }
+
     svc = ScreenerService(repo, asset_type=asset_type, market=market)
     engine = getattr(request.app.state, "strategy_engine", None)
     if engine is None:
