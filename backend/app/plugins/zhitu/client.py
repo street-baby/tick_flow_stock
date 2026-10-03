@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 from typing import Any, List, Optional
 import httpx
 
@@ -73,35 +75,73 @@ def is_index(symbol: str) -> bool:
 
 
 class ZhituClient:
-    """智兔数服 API 请求封装"""
+    """智兔数服 API 请求封装（线程安全 + 防死锁超时 + 429 自适应避让）"""
 
-    def __init__(self, token: Optional[str] = None, base_url: Optional[str] = None, timeout: float = 30.0):
+    _rate_limited_until: float = 0.0
+    _last_429_logged: float = 0.0
+
+    def __init__(self, token: Optional[str] = None, base_url: Optional[str] = None, timeout: float = 10.0):
         self.token = token or get_token()
         self.base_url = (base_url or get_base_url()).rstrip("/")
         self.timeout = timeout
-        self._client: Optional[httpx.Client] = None
+        self._local = threading.local()
+        self._clients: list[httpx.Client] = []
+        self._clients_lock = threading.Lock()
 
     @property
     def client(self) -> httpx.Client:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(
+        c = getattr(self._local, "client", None)
+        if c is None or c.is_closed:
+            c = httpx.Client(
                 base_url=self.base_url,
-                timeout=httpx.Timeout(self.timeout, connect=10.0),
-                headers={"User-Agent": "Mozilla/5.0 (compatible; TickFlowStockPanel/1.0)"}
+                timeout=httpx.Timeout(
+                    timeout=self.timeout,
+                    connect=5.0,
+                    read=8.0,
+                    write=5.0,
+                    pool=5.0,
+                ),
+                headers={"User-Agent": "Mozilla/5.0 (compatible; TickFlowStockPanel/1.0)"},
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
             )
-        return self._client
+            self._local.client = c
+            with self._clients_lock:
+                self._clients.append(c)
+        return c
 
     def close(self) -> None:
-        if self._client is not None and not self._client.is_closed:
-            self._client.close()
-            self._client = None
+        with self._clients_lock:
+            for c in self._clients:
+                if not c.is_closed:
+                    try:
+                        c.close()
+                    except Exception:
+                        pass
+            self._clients.clear()
+        if hasattr(self._local, "client"):
+            try:
+                del self._local.client
+            except Exception:
+                pass
 
-    def get_json(self, path: str, params: Optional[dict] = None) -> Any:
+    def get_json(self, path: str, params: Optional[dict] = None, timeout: Optional[float] = None) -> Any:
+        now = time.time()
+        if now < ZhituClient._rate_limited_until:
+            if now - ZhituClient._last_429_logged > 5.0:
+                logger.warning("智兔 API 处于 429 限流冷静期，剩余 %.1f 秒，跳过请求 [%s]", ZhituClient._rate_limited_until - now, path)
+                ZhituClient._last_429_logged = now
+            return None
+
         q_params = {"token": self.token}
         if params:
             q_params.update(params)
         try:
-            resp = self.client.get(path, params=q_params)
+            req_timeout = timeout if timeout is not None else self.timeout
+            resp = self.client.get(path, params=q_params, timeout=req_timeout)
+            if resp.status_code == 429:
+                ZhituClient._rate_limited_until = time.time() + 25.0
+                logger.warning("智兔 API 触发 429 限流 [%s]，进入 25 秒避让冷静期", path)
+                return None
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, dict) and "error" in data:
@@ -153,11 +193,11 @@ class ZhituClient:
 
         def _fetch_one(sym: str) -> Optional[dict]:
             std = to_standard_code(sym)
-            d1 = self.get_json(f"/hz/history/fsjy/{std}/d")
+            d1 = self.get_json(f"/hz/history/fsjy/{std}/d", timeout=1.5)
             if not d1 or not isinstance(d1, list):
                 return None
             last_d = d1[-1]
-            m5 = self.get_json(f"/hz/history/fsjy/{std}/5")
+            m5 = self.get_json(f"/hz/history/fsjy/{std}/5", timeout=1.5)
             prev_close = float(last_d.get("pc") or 0.0)
             last_price = float(m5[-1]["c"]) if m5 and isinstance(m5, list) and len(m5) > 0 else float(last_d.get("c") or 0.0)
             change_amt = last_price - prev_close if prev_close else 0.0

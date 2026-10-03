@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 
 from fastapi import APIRouter, Query, Request
 from sse_starlette.sse import EventSourceResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/intraday", tags=["quotes"])
 
@@ -294,7 +297,7 @@ def index_quotes(
 
 @router.get("/stream")
 async def quote_stream(request: Request):
-    """SSE 端点: 行情更新 + 告警推送 + 五档修正 + 复盘进度。
+    """SSE 端点: 行情更新 + 告警推送 + 五档修正 + 复盘进度 + 7x24 快讯。
 
     使用 sse-starlette EventSourceResponse:
     - 标准 SSE event 字段，前端按 event name 监听
@@ -304,6 +307,9 @@ async def quote_stream(request: Request):
     每个连接注册一个独立订阅者 (QuoteSubscriber: 独立事件 + 独立队列),
     事件由 QuoteService 广播 — 多客户端 (多标签页/设备) 各自收到全量事件。
     此前四通道共用服务级 Event + pop 取走语义, 告警只会被先醒的连接消费。
+
+    news_updated 由 NewsPoller 在抓到新快讯时写入, 与行情通道独立(快讯节奏
+    与行情轮询无关), 前端只据此重取资讯页的快讯查询。
     """
     qs = _get_quote_service(request)
 
@@ -364,6 +370,17 @@ async def quote_stream(request: Request):
                         "data": json.dumps({
                             "ts": int(time.time() * 1000),
                         }),
+                    }
+
+                # 7x24 快讯有新条目 — 前端只重取资讯页快讯查询(不连带刷新行情页)
+                news = data["news"]
+                if news is not None:
+                    yield {
+                        "event": "news_updated",
+                        "data": json.dumps({
+                            "ts": int(time.time() * 1000),
+                            **news,
+                        }, ensure_ascii=False),
                     }
         finally:
             qs.unsubscribe(sub)

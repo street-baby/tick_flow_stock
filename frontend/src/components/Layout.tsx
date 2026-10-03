@@ -23,6 +23,7 @@ import { QK } from '@/lib/queryKeys'
 import { tierRank } from '@/lib/capability-labels'
 import {
   Star,
+  Newspaper,
   ScanSearch,
   History,
   FileText,
@@ -97,6 +98,7 @@ const NAV_GROUPS: NavCategoryDef[] = [
     items: [
       { to: '/', label: '看板', icon: LayoutDashboard },
       { to: '/watchlist', label: '自选', icon: Star },
+      { to: '/speed-rank', label: '五分钟涨速', icon: Flame, badge: '5m' },
       { to: '/indices', label: '指数', icon: BarChart3 },
       { to: '/stock-analysis', label: '个股分析', icon: TrendingUp },
     ],
@@ -112,6 +114,7 @@ const NAV_GROUPS: NavCategoryDef[] = [
   {
     category: '市场分析',
     items: [
+      { to: '/news-brief', label: '资讯', icon: Newspaper, badge: 'AI' },
       { to: '/limit-ladder', label: '连板梯队', icon: Flame },
       { to: '/longhubang', label: '龙虎榜', icon: Trophy, badge: '资金' },
       { to: '/concept-analysis', label: '概念分析', icon: Layers3 },
@@ -506,6 +509,18 @@ export function Layout() {
             ordered.splice(3, 0, darkItem)
           }
           seen.add('/darkpool')
+        }
+
+        // 如果五分钟涨速未在 savedOrder 中，插入到自选后面
+        if (!seen.has('/speed-rank') && byTo.has('/speed-rank')) {
+          const speedItem = byTo.get('/speed-rank')!
+          const watchlistIdx = ordered.findIndex(item => item.to === '/watchlist')
+          if (watchlistIdx !== -1) {
+            ordered.splice(watchlistIdx + 1, 0, speedItem)
+          } else {
+            ordered.splice(2, 0, speedItem)
+          }
+          seen.add('/speed-rank')
         }
 
         const remaining = allNav.filter(n => !seen.has(n.to))

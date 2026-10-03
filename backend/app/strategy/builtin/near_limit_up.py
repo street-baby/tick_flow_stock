@@ -1,4 +1,4 @@
-"""逼近涨停 — 涨幅 > 7% 且距涨停 < 3%, 盘后选股"""
+"""逼近涨停 — 涨幅 > 7% 且距涨停空间 ≤ 3%, 盘后选股"""
 
 import numpy as np
 
@@ -15,7 +15,7 @@ from app.backtest.matrix import (
 META = {
     "id": "near_limit_up",
     "name": "逼近涨停",
-    "description": "涨幅 > 7% 且距涨停 < 3%, 追涨信号",
+    "description": "涨幅 > 7% 且距涨停空间 ≤ 3% (默认排除已封涨停), 追涨信号",
     "tags": ["涨停", "追涨"],
     "asset_types": ["stock"],
     "timeframes": ["1d"],
@@ -45,12 +45,17 @@ META = {
             "max": 10.0,
             "step": 0.5,
         },
+        {"id": "exclude_limit_up", "label": "排除已封涨停", "type": "bool", "default": True},
     ],
     "scoring": {"change_pct": 0.5, "amount": 0.3, "momentum_5d": 0.2},
     "order_by": "score",
     "descending": True,
     "limit": 50,
 }
+
+# 距涨停空间的下界容差 (0.01 个百分点): change_pct 由 float32 收盘价相除得出,
+# 恰好封板时空间会落在 -1e-8 量级, 硬性 >= 0 会把封板股误判为负空间。
+_ROOM_EPSILON = 1e-4
 
 EXECUTION_BACKEND = "matrix_native"
 ENTRY_SIGNALS = []
@@ -75,10 +80,19 @@ class NearLimitUpMatrixStrategy:
             entry &= change > float(params.get("min_change", 7.0)) / 100.0
         if params.get("use_limit_gap_filter", True):
             limit_pct = matrix_feature(market, "price_limit_pct")
-            entry &= (
-                change
-                >= limit_pct - float(params.get("limit_gap", 3.0)) / 100.0
+            # 距涨停空间 = 涨停幅度 - 当日涨幅, 取 [0, gap] 区间。
+            # 旧实现只设 "涨幅 >= 涨停幅度 - gap" 的下界, 空间为 0 的封板股同样满足
+            # (默认 min_change=7% 与 10%-3% 相等时该条件对主板甚至完全冗余),
+            # 结果清一色是已涨停个股。下界 0 同时剔除前复权噪声导致的负空间。
+            room = limit_pct - change
+            entry &= np.isfinite(room) & (room >= -_ROOM_EPSILON) & (
+                room <= float(params.get("limit_gap", 3.0)) / 100.0
             )
+        if params.get("exclude_limit_up", True):
+            # 已封涨停的票收盘买不到, 且已有连板/涨停类策略覆盖, 不属于「逼近」。
+            # signal_limit_up 由 raw_close 与交易所涨停价比较得出, 比按涨幅阈值
+            # 判断更准 (涨停价取整会让部分封板股涨幅低于 10%)。
+            entry &= ~market.limit_up_locked.astype(bool)
         ma20 = matrix_feature(market, "ma20")
         exit_ = (market.close < ma20) & (shift(market.close, 1) >= shift(ma20, 1))
         return make_signal_matrix(

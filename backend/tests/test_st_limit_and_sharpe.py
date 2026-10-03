@@ -128,6 +128,67 @@ def test_near_limit_up_accepts_stocks_inside_configured_gap():
     assert signals.entry[-1, 0] == 1
 
 
+def test_near_limit_up_excludes_sealed_limit_up():
+    """已封涨停 (signal_limit_up) 不属于「逼近涨停」, 默认应被剔除。
+
+    旧实现只要求「涨幅 >= 涨停幅度 - 距涨停空间」, 空间为 0 的封板股同样命中,
+    导致选出的票几乎全是已涨停个股。
+    """
+    dates = [date(2026, 6, 8) + timedelta(days=index) for index in range(21)]
+    closes = [10.0] * 20 + [11.0]  # 主板 +10% 封板
+    panel = pl.DataFrame({
+        "symbol": ["600001.SH"] * len(dates),
+        "name": ["普通股"] * len(dates),
+        "date": dates,
+        "open": closes,
+        "high": closes,
+        "low": closes,
+        "close": closes,
+        "volume": [1000.0] * len(dates),
+        "signal_limit_up": [False] * 20 + [True],
+    })
+    market = build_market_data_matrix(panel, field_columns={"price_limit_pct"})
+
+    signals = MATRIX_STRATEGY.compute_signals(market, {
+        "min_change": 7.0,
+        "limit_gap": 3.0,
+    })
+    assert signals.entry[-1, 0] == 0
+
+    # 关掉开关后仍可命中: 保留用户按原口径筛选的能力
+    reopened = MATRIX_STRATEGY.compute_signals(market, {
+        "min_change": 7.0,
+        "limit_gap": 3.0,
+        "exclude_limit_up": False,
+    })
+    assert reopened.entry[-1, 0] == 1
+
+
+def test_near_limit_up_rejects_negative_room():
+    """距涨停空间为负 (前复权噪声导致涨幅高于涨停幅度) 应剔除。
+
+    此时收盘价已在涨停价之上, 实际是封板/无涨跌停约束的新股, 不算「逼近」。
+    """
+    dates = [date(2026, 6, 8) + timedelta(days=index) for index in range(21)]
+    closes = [10.0] * 20 + [11.006]  # +10.06% > 主板涨停幅度
+    panel = pl.DataFrame({
+        "symbol": ["600001.SH"] * len(dates),
+        "name": ["普通股"] * len(dates),
+        "date": dates,
+        "open": closes,
+        "high": closes,
+        "low": closes,
+        "close": closes,
+        "volume": [1000.0] * len(dates),
+    })
+    market = build_market_data_matrix(panel, field_columns={"price_limit_pct"})
+    signals = MATRIX_STRATEGY.compute_signals(market, {
+        "min_change": 7.0,
+        "limit_gap": 3.0,
+    })
+    assert signals.entry[-1, 0] == 0
+
+
 def test_sharpe_annualization_matches_rebalance_frequency():
     nav = [
         {"date": "2024-01-31", "Q1": 1.00},

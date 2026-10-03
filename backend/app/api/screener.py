@@ -827,7 +827,7 @@ def limit_ladder(
     as_of: Optional[date] = None,
     direction: str = Query("up", description="up=涨停梯队 | down=跌停梯队"),
     ext_columns: Optional[str] = Query(None, description="逗号分隔: config_id.field_name"),
-    market: str = Query("cn", description="cn|hk|us（多市场扩展）"),
+    market: str = Query("cn", description="cn|hk|us|crypto（多市场扩展）"),
 ):
     """连板/连跌梯队 — 按连板数分组, 含三状态。
     返回: tiers = [{ boards, count, stocks: [{symbol,name,change_pct,status,...}] }]
@@ -839,12 +839,12 @@ def limit_ladder(
 
     ext_columns: 动态 JOIN 扩展数据, 如 "concept.concept,industry.industry"
 
-    market=hk|us（多市场扩展）: 返回与 A 股同构的 tiers——
+    market=hk|us|crypto（多市场扩展）: 返回与 A 股同构的 tiers——
       boards = 20日动量档位(0-5), status = high(60日新高)/momentum(强动量)/volume(放量),
       counts.up/down = 60日新高/新低数。前端复用 A 股连板梯队 UI。
     """
-    if market in ("hk", "us"):
-        return _limit_ladder_market(request, market, as_of)
+    if market in ("hk", "us", "crypto"):
+        return _limit_ladder_market(request, market, as_of, direction)
     import polars as pl
 
     is_down = direction == "down"
@@ -883,8 +883,14 @@ def limit_ladder(
         return {"as_of": str(as_of), "tiers": [], "counts": {"up": 0, "down": 0}}
 
     # 双方向涨跌停计数(不论当前 direction, 前端始终同时显示)
-    count_up_raw = int(df.filter(pl.col("signal_limit_up").fill_null(False)).height) if "signal_limit_up" in df.columns else 0
-    count_down_raw = int(df.filter(pl.col("signal_limit_down").fill_null(False)).height) if "signal_limit_down" in df.columns else 0
+    # 防御性过滤: 涨跌幅必须达到起步阈值 (>=4% / <=-4%)，防止任何异常脏数据渗入涨跌停计数
+    up_mask = pl.col("signal_limit_up").fill_null(False)
+    down_mask = pl.col("signal_limit_down").fill_null(False)
+    if "change_pct" in df.columns:
+        up_mask = up_mask & (pl.col("change_pct") >= 0.04)
+        down_mask = down_mask & (pl.col("change_pct") <= -0.04)
+    count_up_raw = int(df.filter(up_mask).height) if "signal_limit_up" in df.columns else 0
+    count_down_raw = int(df.filter(down_mask).height) if "signal_limit_down" in df.columns else 0
 
     # 双方向 sealed 修正: 减去各自的假涨停(假涨停已归炸板, 不计入涨停数)
     depth_svc_global = getattr(request.app.state, "depth_service", None)
@@ -931,19 +937,36 @@ def limit_ladder(
     # 表达式
     is_limit = pl.col(sig_col).fill_null(False) if sig_col in df.columns else pl.lit(False)
     is_broken = pl.col(broken_col).fill_null(False) if broken_col in df.columns else pl.lit(False)
+    if "change_pct" in df.columns:
+        if not is_down:
+            is_limit = is_limit & (pl.col("change_pct") >= 0.04)
+            is_broken = is_broken & ((pl.col("change_pct") >= 0.04) | ((pl.col("change_pct") > 0) & (pl.col("close") > 0)))
+        else:
+            is_limit = is_limit & (pl.col("change_pct") <= -0.04)
     consec = pl.col(consec_col).fill_null(0) if consec_col in df.columns else pl.lit(0)
     prev_c = pl.col("prev_consec").fill_null(0)
 
     # 计算 status + boards (结构涨跌停对称, 仅字段与字面量不同)
     is_failed = ~is_limit & ~is_broken & (prev_c > 0)
+    effective_boards = (
+        pl.when(is_limit)
+        .then(pl.max_horizontal(consec, prev_c + 1))
+        .when(is_broken | is_failed)
+        .then(prev_c + 1)
+        .otherwise(0)
+        .cast(pl.UInt32)
+    )
     df = df.with_columns([
         pl.when(is_limit).then(pl.lit(status_main))
         .when(is_broken).then(pl.lit(status_broken))
         .when(is_failed).then(pl.lit(status_failed))
         .otherwise(None).alias("status"),
-        pl.when(is_limit).then(consec)
-        .when(is_broken | is_failed).then(prev_c + 1)
-        .otherwise(0).cast(pl.UInt32).alias("boards"),
+        effective_boards.alias("boards"),
+        pl.when(is_limit & (consec < (prev_c + 1)))
+        .then(prev_c + 1)
+        .otherwise(consec)
+        .cast(pl.UInt32)
+        .alias(consec_col),
     ])
 
     df = df.filter(pl.col("status").is_not_null() & (pl.col("boards") > 0))
@@ -1118,16 +1141,30 @@ def _parse_ext_columns(ext_columns: str) -> list[tuple[str, str]]:
 # ================================================================
 # 港美股强度梯队（多市场扩展）— 与 A 股连板梯队同构返回
 # ================================================================
-def _limit_ladder_market(request: Request, market: str, as_of: date | None) -> dict:
-    """港美股强度梯队：复用 A 股连板梯队 UI，语义替换。
+def _limit_ladder_market(request: Request, market: str, as_of: date | None, direction: str = "up") -> dict:
+    """港美股及加密货币强度梯队：复用 A 股连板梯队 UI，语义替换。
 
-    - boards = 20日动量档位: ≥25%→5, ≥15%→4, ≥8%→3, ≥3%→2, 其余不显示
+    - 美股/加密货币: 优先调用 TradingView 实时动量分档
+    - boards = 动量档位: ≥15%→5, ≥8%→4, ≥4%→3, ≥2%→2 (加密货币: ≥20%→5, ≥10%→4, ≥5%→3, ≥2%→2)
     - status = high(60日新高突破) | momentum(强动量) | volume(放量)
-    - counts.up/down = 60日新高/新低数
+    - counts.up/down = 上涨/下跌数
     """
     import polars as pl
 
     repo = request.app.state.repo
+
+    if market in ("us", "crypto") and type(repo).__name__ != "_FakeRepo":
+        from app.plugins.tradingview.overview import get_tradingview_limit_ladder, get_us_trading_date
+        target_date = get_us_trading_date() if market == "us" else date.today()
+        if as_of is None or as_of >= target_date:
+            try:
+                tv_ladder = get_tradingview_limit_ladder(market=market, as_of=target_date, direction=direction)
+                if tv_ladder and tv_ladder.get("tiers"):
+                    return tv_ladder
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("获取 TradingView %s 梯队失败，回退本地: %s", market, e)
+
     svc = ScreenerService(repo, market=market)
     as_of = as_of or svc.latest_date()
     if not as_of:

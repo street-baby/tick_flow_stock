@@ -23,8 +23,9 @@ export const QK = {
 
   // Watchlist
   watchlist:            ['watchlist'] as const,
+  watchlistGroups:      ['watchlist-groups'] as const,
   watchlistQuotes:      ['watchlist-quotes'] as const,
-  watchlistEnriched:    (ext?: string) => ['watchlist-enriched', ext] as const,
+  watchlistEnriched:    (ext?: string, group?: string) => ['watchlist-enriched', ext ?? '', group ?? ''] as const,
   watchlistKlineBatch:  (symbols: string) => ['watchlist-kline-batch', symbols] as const,
   // 不用 watchlist- 前缀: 避免被 SSE quotes_updated 高频失效(expert 1s/pro 2s)
   // 导致每次都拉 TickFlow 触限流。分时图用固定 refetchInterval 刷新即可。
@@ -90,6 +91,23 @@ export const QK = {
   regimeLatest:         ['regime-latest'] as const,
   regimeStates:         (days: number) => ['regime-states', days] as const,
   regimeCoverage:       ['regime-coverage'] as const,
+
+  // 龙虎榜数据
+  lhbDaily:             ['lhb-daily'] as const,
+  lhbStockStats:        (days: number) => ['lhb-stock-stats', days] as const,
+  lhbBranchStats:       (days: number) => ['lhb-branch-stats', days] as const,
+  lhbInstitutionStats:  (days: number) => ['lhb-institution-stats', days] as const,
+  lhbInstitutionDetails: ['lhb-institution-details'] as const,
+
+  // 五分钟涨速排行榜
+  speedRank:            (sortBy?: string) => ['speed-rank', sortBy ?? 'speed_5m'] as const,
+
+  // 资讯页: 板块简报 + 打标快讯
+  // 不进 SSE_INVALIDATE_PREFIXES —— 简报是日级数据, 快讯由 SSE news_updated
+  // 精准触发(见 useQuoteStream) + 30s 兜底轮询, 跟随行情 tick 失效只会成倍放大请求
+  sectorBrief:          (kind: string) => ['sector-brief', kind] as const,
+  flashTagged:          (limit: number) => ['flash-tagged', limit] as const,
+  newsLiveStatus:       ['news-live-status'] as const,
 } as const
 
 // ===== SSE 应该 invalidate 的 key 前缀列表 =====

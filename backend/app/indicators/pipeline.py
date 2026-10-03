@@ -770,6 +770,8 @@ def compute_limit_signals(
 
     # 生效涨跌停价: 维表日期与行情日期一致时使用权威值, 否则使用理论价。
     # 旧版维表没有 as_of, 保持仅在最新行情日使用权威值的兼容行为。
+    # 防御性校验: 权威涨停价必须严格大于昨收价 (A股涨停价不可能<=昨收),
+    # 且与理论涨停价偏差在合理范围 (<=2% 或 0.05元), 避免跨天未刷新维表残留昨日旧涨停价导致炸板误判。
     _SENTINEL = 10000.0
     if "_instrument_as_of" in df.columns:
         authoritative_date = (
@@ -777,20 +779,33 @@ def compute_limit_signals(
         )
     else:
         authoritative_date = pl.col("date") == pl.col("date").max()
+
+    has_prev = pl.col("_prev_raw_close").is_not_null() & (pl.col("_prev_raw_close") > 0)
+    diff_up = (pl.col("limit_up") - pl.col("_theoretical_limit_up")).abs() if "limit_up" in df.columns else pl.lit(0.0)
+    max_up_diff = pl.max_horizontal(pl.lit(0.05), pl.col("_theoretical_limit_up") * 0.02)
+    is_valid_authoritative_up = (
+        authoritative_date
+        & pl.col("limit_up").is_not_null()
+        & (pl.col("limit_up") < _SENTINEL)
+        & (~has_prev | ((pl.col("limit_up") > pl.col("_prev_raw_close")) & (diff_up <= max_up_diff)))
+    ) if "limit_up" in df.columns else pl.lit(False)
+
+    diff_down = (pl.col("limit_down") - pl.col("_theoretical_limit_down")).abs() if "limit_down" in df.columns else pl.lit(0.0)
+    max_down_diff = pl.max_horizontal(pl.lit(0.05), pl.col("_theoretical_limit_down") * 0.02)
+    is_valid_authoritative_down = (
+        authoritative_date
+        & pl.col("limit_down").is_not_null()
+        & (pl.col("limit_down") > 0)
+        & (pl.col("limit_down") < _SENTINEL)
+        & (~has_prev | ((pl.col("limit_down") < pl.col("_prev_raw_close")) & (diff_down <= max_down_diff)))
+    ) if "limit_down" in df.columns else pl.lit(False)
+
     if "limit_up" in df.columns:
-        effective_limit_up = pl.when(
-            authoritative_date
-            & pl.col("limit_up").is_not_null()
-            & (pl.col("limit_up") < _SENTINEL)
-        ).then(pl.col("limit_up")).otherwise(pl.col("_theoretical_limit_up"))
+        effective_limit_up = pl.when(is_valid_authoritative_up).then(pl.col("limit_up")).otherwise(pl.col("_theoretical_limit_up"))
     else:
         effective_limit_up = pl.col("_theoretical_limit_up")
     if "limit_down" in df.columns:
-        effective_limit_down = pl.when(
-            authoritative_date
-            & pl.col("limit_down").is_not_null()
-            & (pl.col("limit_down") < _SENTINEL)
-        ).then(pl.col("limit_down")).otherwise(pl.col("_theoretical_limit_down"))
+        effective_limit_down = pl.when(is_valid_authoritative_down).then(pl.col("limit_down")).otherwise(pl.col("_theoretical_limit_down"))
     else:
         effective_limit_down = pl.col("_theoretical_limit_down")
     effective_exprs: list[pl.Expr] = []
@@ -802,13 +817,20 @@ def compute_limit_signals(
 
     # ── signal_limit_up ──
     if need_up:
+        min_up_pct = pl.max_horizontal(pl.lit(0.035), pl.col("_limit_pct") - 0.02)
+        actual_change_pct = (
+            pl.col("change_pct")
+            if "change_pct" in df.columns
+            else (pl.col("raw_close") - pl.col("_prev_raw_close")) / pl.col("_prev_raw_close")
+        )
         df = df.with_columns(
         pl.when(
             pl.col("_prev_raw_close").is_not_null()
             & (pl.col("_prev_raw_close") > 0)
             & (pl.col("raw_close") > 0)
         ).then(
-            pl.col("raw_close") >= (pl.col("_effective_limit_up") - 0.005)
+            (pl.col("raw_close") >= (pl.col("_effective_limit_up") - 0.005))
+            & (actual_change_pct.is_null() | (actual_change_pct >= min_up_pct))
         ).otherwise(None).cast(pl.Boolean)
         .alias("signal_limit_up")
         )
@@ -838,13 +860,20 @@ def compute_limit_signals(
 
     # ── signal_limit_down ──
     if need_down:
+        min_down_pct = pl.max_horizontal(pl.lit(0.035), pl.col("_limit_pct") - 0.02)
+        actual_change_pct = (
+            pl.col("change_pct")
+            if "change_pct" in df.columns
+            else (pl.col("raw_close") - pl.col("_prev_raw_close")) / pl.col("_prev_raw_close")
+        )
         df = df.with_columns(
         pl.when(
             pl.col("_prev_raw_close").is_not_null()
             & (pl.col("_prev_raw_close") > 0)
             & (pl.col("raw_close") > 0)
         ).then(
-            pl.col("raw_close") <= (pl.col("_effective_limit_down") + 0.005)
+            (pl.col("raw_close") <= (pl.col("_effective_limit_down") + 0.005))
+            & (actual_change_pct.is_null() | (actual_change_pct <= -min_down_pct))
         ).otherwise(None).cast(pl.Boolean)
         .alias("signal_limit_down")
         )
@@ -888,8 +917,12 @@ def compute_limit_signals(
         )
 
     # ── signal_broken_limit_up (炸板) ──
-    # 条件: 最高价曾触及涨停价 + 最终没有封住涨停
+    # 条件: 最高价曾触及涨停价 + 最终没有封住涨停 + 最高涨幅达到涨停底线
     if "signal_broken_limit_up" in want:
+        min_up_pct = pl.max_horizontal(pl.lit(0.035), pl.col("_limit_pct") - 0.02)
+        actual_high_pct = (
+            (pl.col("raw_high") - pl.col("_prev_raw_close")) / pl.col("_prev_raw_close")
+        )
         df = df.with_columns(
         pl.when(
             pl.col("_prev_raw_close").is_not_null()
@@ -898,6 +931,7 @@ def compute_limit_signals(
         ).then(
             (~pl.col("signal_limit_up").fill_null(False))               # 最终没封住涨停
             & (pl.col("raw_high") >= pl.col("_effective_limit_up") - 0.005)  # 曾触及涨停价
+            & (actual_high_pct.is_null() | (actual_high_pct >= min_up_pct))
         ).otherwise(None).cast(pl.Boolean)
         .alias("signal_broken_limit_up")
         )
@@ -1400,6 +1434,7 @@ def _load_recent_history(enriched_base: Path, symbols: list[str], days: int) -> 
     from datetime import date, timedelta
     cutoff = date.today() - timedelta(days=days + 30)  # 多读 30 天余量
 
+    _cast = pl.ScanCastOptions(integer_cast="allow-float")
     try:
         lf = (
             scan_enriched_parquet(str(enriched_base / "**" / "*.parquet"), cast_options=_cast)
@@ -1464,11 +1499,13 @@ def compute_enriched_today(
     if today_ohlcv.is_empty() or live_agg.is_empty():
         return pl.DataFrame()
 
+    today_ohlcv = today_ohlcv.unique(subset=["symbol"], keep="last", maintain_order=True)
+
     alpha = _ema_alpha
 
     # ---- JOIN: 今天的 OHLCV + 各股票最后一个有效交易日的递推状态 ----
     # 当日行情是主表, 复牌或新上市股票不能因为没有历史状态而被静默删除。
-    live_state = live_agg.with_columns(pl.lit(True).alias("_has_history_state"))
+    live_state = live_agg.unique(subset=["symbol"], keep="last").with_columns(pl.lit(True).alias("_has_history_state"))
     df = today_ohlcv.join(live_state, on="symbol", how="left")
     has_history_state = pl.col("_has_history_state").fill_null(False)
 
@@ -1497,12 +1534,17 @@ def compute_enriched_today(
     # prev_close: 有则直接用 (来自 API quote_extra, raw), 需要乘 adj_factor 对齐复权价
     if "prev_close" not in df.columns:
         prev_close = pl.col("close_right") if "close_right" in df.columns else pl.col("close")
-        df = df.with_columns(prev_close.alias("prev_close"))
+        df = df.with_columns([
+            prev_close.alias("prev_close"),
+            prev_close.alias("_prev_close_raw"),
+        ])
     elif "_adj_factor" in df.columns:
         # 保存 API 原始前收盘价 (用于涨跌停价计算)
         df = df.with_columns(pl.col("prev_close").alias("_prev_close_raw"))
         # API 返回的 prev_close 是原始价, 乘复权因子对齐复权价 (用于 change_pct)
         df = df.with_columns((pl.col("prev_close") * pl.col("_adj_factor").fill_null(1.0)).alias("prev_close"))
+    else:
+        df = df.with_columns(pl.col("prev_close").alias("_prev_close_raw"))
 
     # change_pct / change_amount / amplitude: 有则直接用, 无则计算
     if "change_pct" not in df.columns:
@@ -1649,7 +1691,7 @@ def compute_enriched_today(
 
     # ---- 信号 (需要昨天的指标值判断交叉) ----
     if not prev_enriched.is_empty():
-        sig_prev = prev_enriched.select(
+        sig_prev = prev_enriched.unique(subset=["symbol"], keep="last").select(
             "symbol",
             pl.col("ma5").alias("_prev_ma5"),
             pl.col("ma10").alias("_prev_ma10"),
@@ -1698,7 +1740,7 @@ def compute_enriched_today(
 
         df = df.drop([
             c for c in df.columns
-            if c.startswith("_prev_") and c not in {"_prev_consec_up", "_prev_consec_down"}
+            if c.startswith("_prev_") and c not in {"_prev_consec_up", "_prev_consec_down", "_prev_close_raw"}
         ])
 
     # N日新高/新低 + 放量
@@ -1752,7 +1794,7 @@ def compute_enriched_today(
             for c in float_cols
         ])
 
-    return df
+    return df.unique(subset=["symbol"], keep="last", maintain_order=True)
 
 
 def _compute_limit_signals_today(df: pl.DataFrame, instruments: pl.DataFrame) -> pl.DataFrame:
@@ -1793,9 +1835,18 @@ def _compute_limit_signals_today(df: pl.DataFrame, instruments: pl.DataFrame) ->
     # 优先用 API 原始前收盘价, 回退到 close_right, 最后回退到 raw_close
     if "_prev_close_raw" in df.columns:
         if "close_right" in df.columns:
-            prev_raw = pl.when(pl.col("_prev_close_raw").is_not_null()).then(pl.col("_prev_close_raw")).otherwise(pl.col("close_right"))
+            prev_raw = pl.when(pl.col("_prev_close_raw").is_not_null() & (pl.col("_prev_close_raw") > 0)) \
+                         .then(pl.col("_prev_close_raw")) \
+                         .otherwise(pl.col("close_right"))
         else:
             prev_raw = pl.col("_prev_close_raw")
+    elif "prev_close" in df.columns:
+        if "_adj_factor" in df.columns:
+            prev_raw = pl.when(pl.col("_adj_factor").is_not_null() & (pl.col("_adj_factor") > 0)) \
+                         .then(pl.col("prev_close") / pl.col("_adj_factor")) \
+                         .otherwise(pl.col("prev_close"))
+        else:
+            prev_raw = pl.col("prev_close")
     elif "close_right" in df.columns:
         prev_raw = pl.col("close_right")
     else:
@@ -1854,18 +1905,41 @@ def _compute_limit_signals_today(df: pl.DataFrame, instruments: pl.DataFrame) ->
         effective_limit_down = limit_down_price
 
     valid_prev_raw = prev_raw.is_not_null() & (prev_raw > 0)
+
+    # 实际涨跌幅计算（优先 change_pct, 否则由原始价推算）
+    actual_change_pct = (
+        pl.col("change_pct")
+        if "change_pct" in df.columns
+        else pl.when(valid_prev_raw).then((pl.col("raw_close") - prev_raw) / prev_raw).otherwise(None)
+    )
+    actual_high_pct = (
+        pl.when(valid_prev_raw).then((pl.col("raw_high") - prev_raw) / prev_raw).otherwise(None)
+    )
+
+    # 最小涨跌幅底线校验 (防御性):
+    # A股涨跌停至少需要达到板幅底线 (10%主板>=8%, 20%双创>=18%, 30%北交>=28%, ST>=3.5%)
+    # 彻底杜绝前收盘价错位、除权除息残留或维表延迟导致 1%~2% 甚至绿盘个股被误判为涨停
+    min_up_pct = pl.max_horizontal(pl.lit(0.035), limit_pct - 0.02)
+    min_down_pct = pl.max_horizontal(pl.lit(0.035), limit_pct - 0.02)
+
     is_limit_up = (
         pl.when(no_price_limit)
           .then(False)
           .when((valid_prev_raw | has_authoritative_up) & (pl.col("raw_close") > 0))
-          .then(pl.col("raw_close") >= (effective_limit_up - 0.005))
+          .then(
+              (pl.col("raw_close") >= (effective_limit_up - 0.005))
+              & (actual_change_pct.is_null() | (actual_change_pct >= min_up_pct))
+          )
           .otherwise(None).cast(pl.Boolean)
     )
     is_limit_down = (
         pl.when(no_price_limit)
           .then(False)
           .when((valid_prev_raw | has_authoritative_down) & (pl.col("raw_close") > 0))
-          .then(pl.col("raw_close") <= (effective_limit_down + 0.005))
+          .then(
+              (pl.col("raw_close") <= (effective_limit_down + 0.005))
+              & (actual_change_pct.is_null() | (actual_change_pct <= -min_down_pct))
+          )
           .otherwise(None).cast(pl.Boolean)
     )
 
@@ -1882,13 +1956,14 @@ def _compute_limit_signals_today(df: pl.DataFrame, instruments: pl.DataFrame) ->
               & (pl.col("close") > pl.col("open"))
           ).otherwise(None).cast(pl.Boolean)
           .alias("signal_limit_down_recovery"),
-        # 炸板: 最高价曾触及涨停价 + 最终未封住
+        # 炸板: 最高价曾触及涨停价 + 最终未封住 + 最高涨幅达到涨停底线
         pl.when(no_price_limit)
           .then(False)
           .when((valid_prev_raw | has_authoritative_up) & (pl.col("raw_high") > 0))
           .then(
               (~is_limit_up.fill_null(True))
               & (pl.col("raw_high") >= effective_limit_up - 0.005)
+              & (actual_high_pct.is_null() | (actual_high_pct >= min_up_pct))
           ).otherwise(None).cast(pl.Boolean)
           .alias("signal_broken_limit_up"),
     ])

@@ -760,29 +760,30 @@ const MARKET_TIER_TABS: { key: FilterKey; label: string }[] = [
   { key: 'tier2', label: '动量2档' },
 ]
 
-const MARKET_BOARD_TABS: Record<'hk' | 'us', { key: FilterKey; label: string }[]> = {
+const MARKET_BOARD_TABS: Record<'hk' | 'us' | 'crypto', { key: FilterKey; label: string }[]> = {
   hk: [
     { key: 'hk_main', label: '主板' },
     { key: 'hk_gem', label: '创业板GEM' },
   ],
   us: [],  // 美股无交易所/板块字段，暂不提供板块分类
+  crypto: [], // 加密货币按 24/7 现货运行，不按板块分类
 }
 
 function marketStatusTabs(): { key: FilterKey; label: string }[] {
   return MARKET_STATUS_TABS
 }
 
-function marketBoardTabs(market: 'hk' | 'us'): { key: FilterKey; label: string }[] {
-  return MARKET_BOARD_TABS[market]
+function marketBoardTabs(market: 'hk' | 'us' | 'crypto'): { key: FilterKey; label: string }[] {
+  return MARKET_BOARD_TABS[market] ?? []
 }
 
-function marketDefaultFilters(market: 'hk' | 'us'): Set<FilterKey> {
+function marketDefaultFilters(market: 'hk' | 'us' | 'crypto'): Set<FilterKey> {
   const keys: FilterKey[] = ['high', 'momentum', 'volume', 'tier5', 'tier4', 'tier3', 'tier2']
   keys.push(...marketBoardTabs(market).map(t => t.key))
   return new Set(keys)
 }
 
-function filterTiers(tiers: LimitLadderTier[], keys: Set<FilterKey>, bf?: BrokenFailedConfig): LimitLadderTier[] {
+function filterTiers(tiers: LimitLadderTier[], keys: Set<FilterKey>, bf?: BrokenFailedConfig, isCn = true): LimitLadderTier[] {
   const cfg = { ...DEFAULT_BF, ...bf }
 
   const statusKeys = [...keys].filter(isStatusKey)
@@ -792,11 +793,15 @@ function filterTiers(tiers: LimitLadderTier[], keys: Set<FilterKey>, bf?: Broken
     .map(t => ({
       ...t,
       stocks: t.stocks.filter(s => {
-        // 严格过滤无名称或非 6 位 A 股代码的标的（如 5 位港股代码或基金代码）
+        // A股严格过滤无名称或非 6 位 A 股代码的标的（如 5 位港股代码或基金代码）；美港股/加密货币仅需 symbol 非空
         const hasValidName = !!s.name && s.name.trim() !== '' && s.name !== s.symbol
-        const cleanCode = s.symbol.replace(/\.(SH|SZ|BJ)$/i, '')
-        const isSixDigits = /^\d{6}$/.test(cleanCode)
-        if (!hasValidName || !isSixDigits) return false
+        if (isCn) {
+          const cleanCode = s.symbol.replace(/\.(SH|SZ|BJ)$/i, '')
+          const isSixDigits = /^\d{6}$/.test(cleanCode)
+          if (!hasValidName || !isSixDigits) return false
+        } else {
+          if (!s.symbol) return false
+        }
 
         if (keys.size === 0) return true
 
@@ -1546,7 +1551,7 @@ export function LimitUpLadder() {
   const [direction, setDirection] = useState<Direction>(() => storage.limitLadderDirection.get('up'))
   const [sealMode, setSealMode] = useState<'vol' | 'amount'>(() => storage.limitLadderSealMode.get('vol'))
   const [filterKeys, setFilterKeys] = useState<Set<FilterKey>>(() =>
-    isCn ? loadFilterKeys() : marketDefaultFilters(market as 'hk' | 'us'),
+    isCn ? loadFilterKeys() : marketDefaultFilters(market as 'hk' | 'us' | 'crypto'),
   )
   const [extFields, setExtFields] = useState<ExtFieldConfig>(loadExtFields)
   const [showExtConfig, setShowExtConfig] = useState(false)
@@ -1576,7 +1581,7 @@ export function LimitUpLadder() {
     storage.limitLadderDirection.set(d)
     // 切换方向时重置状态筛选为该方向默认集(避免涨跌状态键错配)
     if (!isCn) {
-      const mk = marketDefaultFilters(market as 'hk' | 'us')
+      const mk = marketDefaultFilters(market as 'hk' | 'us' | 'crypto')
       setFilterKeys(mk)
       storage.limitLadderBoard.set([...mk])
       return
@@ -1593,7 +1598,7 @@ export function LimitUpLadder() {
   // 市场切换时重置过滤为市场默认（A股↔港美股切换）
   useEffect(() => {
     if (!isCn) {
-      const mk = marketDefaultFilters(market as 'hk' | 'us')
+      const mk = marketDefaultFilters(market as 'hk' | 'us' | 'crypto')
       setFilterKeys(mk)
     }
     // 切回 A 股时保留用户此前保存的 A 股过滤
@@ -1654,7 +1659,7 @@ export function LimitUpLadder() {
   }, [asOf, data?.as_of])
 
   const rawTiers = data?.tiers ?? []
-  const tiers = filterTiers(rawTiers, filterKeys, extFields.bf)
+  const tiers = filterTiers(rawTiers, filterKeys, extFields.bf, isCn)
   const displayDate = data?.as_of ?? asOf
 
   // sealed 降级判定
@@ -1799,7 +1804,7 @@ export function LimitUpLadder() {
             <div className="w-px h-4 bg-border mx-1" />
 
             {/* 板块组: A股 主板/创业板/科创板/北交所/ST；港美股 强度档 + 主板/GEM */}
-            {(isCn ? BOARD_TABS : [...MARKET_TIER_TABS, ...marketBoardTabs(market as 'hk' | 'us')]).map(tab => (
+            {(isCn ? BOARD_TABS : [...MARKET_TIER_TABS, ...marketBoardTabs(market as 'hk' | 'us' | 'crypto')]).map(tab => (
               <button
                 key={tab.key}
                 onClick={() => toggleFilter(tab.key)}

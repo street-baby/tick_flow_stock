@@ -875,6 +875,16 @@ def fetch_minute_single(
         )
     except Exception as e:
         logger.warning("fetch_minute_single(%s, %s) failed: %s", symbol, trade_date, e)
+        try:
+            from app.data_providers import custom as custom_sources
+            if custom_sources.provider_has_dataset("zhitu", "minute"):
+                zhitu_p = custom_sources.get_provider("zhitu")
+                if zhitu_p:
+                    fallback_df = zhitu_p.get_minute([symbol], start_time=start_time, end_time=end_time, asset_type=asset_type, freq="1m")
+                    if fallback_df is not None and len(fallback_df) > 0:
+                        return fallback_df
+        except Exception as ze:
+            logger.debug("zhitu fallback for minute failed: %s", ze)
         return pl.DataFrame()
 
     if isinstance(raw, dict):

@@ -233,6 +233,38 @@ export interface WatchlistEntry {
   added_at: string
   note?: string
   name?: string | null
+  group?: string
+}
+
+export interface WatchlistGroup {
+  name: string
+  count: number
+}
+
+export interface SpeedRankStock {
+  symbol: string
+  name: string
+  industry?: string
+  price: number
+  change_pct: number
+  change_amount: number
+  speed_5m: number
+  speed: number
+  volume_ratio: number
+  turnover_rate: number
+  amount: number
+  amplitude: number
+  total_mv: number
+  float_mv: number
+  time: string
+  rank: number
+}
+
+export interface SpeedRankResponse {
+  as_of: string | null
+  total: number
+  source: string
+  rows: SpeedRankStock[]
 }
 
 export interface WatchlistImportCandidate {
@@ -264,7 +296,7 @@ export interface IndexInstrument {
   symbol: string
   name?: string | null
   code?: string | null
-  asset_type?: 'index'
+  asset_type?: 'index' | 'crypto'
   [key: string]: any
 }
 
@@ -1418,6 +1450,7 @@ export const api = {
       stock_info?: { name?: string; total_shares?: number; float_shares?: number; ext?: Record<string, unknown> }
       rows: KlineRow[]
       source?: string
+      asset_type?: string
     }>(
       (dateRange
         ? `/api/kline/daily?symbol=${encodeURIComponent(symbol)}&start_date=${dateRange.start}&end_date=${dateRange.end}`
@@ -1452,11 +1485,20 @@ export const api = {
       stock_info?: { name?: string; total_shares?: number; float_shares?: number }
       date: string | null
       rows: MinuteKlineRow[]
-      source?: 'local' | 'live' | 'none'
-      asset_type?: 'stock' | 'etf' | 'index'
+      source?: 'local' | 'live' | 'none' | 'crypto-live'
+      asset_type?: 'stock' | 'etf' | 'index' | 'crypto'
       price_limit?: PriceLimitInfo | null
     }>(
       `/api/kline/minute?symbol=${encodeURIComponent(symbol)}${date ? `&date=${date}` : ''}`,
+    ),
+  cryptoDaily: (symbol: string, days = 180) =>
+    request<{
+      symbol: string
+      name?: string
+      rows: KlineRow[]
+      source?: string
+    }>(
+      `/api/kline/daily?symbol=${encodeURIComponent(symbol)}&days=${days}`,
     ),
   indexList: () => request<{ results: IndexInstrument[]; count: number }>('/api/index/list'),
   indexSearch: (q: string, limit = 20) =>
@@ -1528,16 +1570,30 @@ export const api = {
       method: 'POST',
     }),
 
-  watchlistList: () => request<{ symbols: WatchlistEntry[] }>('/api/watchlist'),
-  watchlistAdd: (symbol: string, note = '') =>
+  watchlistList: ((group?: string | unknown) =>
+    request<{ symbols: WatchlistEntry[] }>(
+      typeof group === 'string' && group !== '全部'
+        ? `/api/watchlist?group=${encodeURIComponent(group)}`
+        : '/api/watchlist',
+    )) as {
+      (): Promise<{ symbols: WatchlistEntry[] }>
+      (group?: string): Promise<{ symbols: WatchlistEntry[] }>
+    },
+  watchlistGroups: () =>
+    request<{ groups: WatchlistGroup[] }>('/api/watchlist/groups'),
+  watchlistPopulateSectors: () =>
+    request<{ success: boolean; total_sectors: number; total_stocks_added: number }>('/api/watchlist/populate-sectors', {
+      method: 'POST',
+    }),
+  watchlistAdd: (symbol: string, note = '', group = '默认') =>
     request<{ symbols: WatchlistEntry[] }>('/api/watchlist', {
       method: 'POST',
-      body: JSON.stringify({ symbol, note }),
+      body: JSON.stringify({ symbol, note, group }),
     }),
-  watchlistBatchAdd: (symbols: string[], note = '') =>
+  watchlistBatchAdd: (symbols: string[], note = '', group = '默认') =>
     request<{ symbols: WatchlistEntry[]; added: number }>('/api/watchlist/batch', {
       method: 'POST',
-      body: JSON.stringify({ symbols, note }),
+      body: JSON.stringify({ symbols, note, group }),
     }),
   watchlistOcrStatus: () =>
     request<{ provider: string; available: boolean }>('/api/watchlist/ocr-status'),
@@ -1551,25 +1607,31 @@ export const api = {
       quiet,
     })
   },
-  watchlistRemove: (symbol: string) =>
+  watchlistRemove: (symbol: string, group?: string) =>
     request<{ symbols: WatchlistEntry[] }>(
-      `/api/watchlist/${encodeURIComponent(symbol)}`,
+      `/api/watchlist/${encodeURIComponent(symbol)}${group && group !== '全部' ? `?group=${encodeURIComponent(group)}` : ''}`,
       { method: 'DELETE' },
     ),
-  watchlistMoveToTop: (symbol: string) =>
+  watchlistMoveToTop: (symbol: string, group?: string) =>
     request<{ symbols: WatchlistEntry[] }>(
-      `/api/watchlist/${encodeURIComponent(symbol)}/top`,
+      `/api/watchlist/${encodeURIComponent(symbol)}/top${group && group !== '全部' ? `?group=${encodeURIComponent(group)}` : ''}`,
       { method: 'POST' },
     ),
-  watchlistClear: () =>
-    request<{ removed: number }>('/api/watchlist', { method: 'DELETE' }),
-  watchlistQuotes: () => request<{ quotes: Quote[] }>('/api/watchlist/quotes'),
-  watchlistEnriched: (extColumns?: string) =>
-    request<{ rows: any[]; as_of: string | null; elapsed_ms: number }>(
-      extColumns
-        ? `/api/watchlist/enriched?ext_columns=${encodeURIComponent(extColumns)}`
-        : '/api/watchlist/enriched',
+  watchlistClear: (group?: string) =>
+    request<{ removed: number }>(
+      group && group !== '全部' ? `/api/watchlist?group=${encodeURIComponent(group)}` : '/api/watchlist',
+      { method: 'DELETE' },
     ),
+  watchlistQuotes: () => request<{ quotes: Quote[] }>('/api/watchlist/quotes'),
+  watchlistEnriched: (extColumns?: string, group?: string) => {
+    const params = new URLSearchParams()
+    if (extColumns) params.set('ext_columns', extColumns)
+    if (group && group !== '全部') params.set('group', group)
+    const qs = params.toString()
+    return request<{ rows: any[]; as_of: string | null; elapsed_ms: number }>(
+      qs ? `/api/watchlist/enriched?${qs}` : '/api/watchlist/enriched',
+    )
+  },
 
   screenerStrategies: async (assetType?: 'stock' | 'etf' | 'index', market?: string) => {
     const data = await request<{ strategies: StrategyDetail[]; load_errors?: StrategyLoadError[] }>(
@@ -1618,6 +1680,20 @@ export const api = {
     ),
   indicesMarketSync: (market: 'hk' | 'us') =>
     request<{ ok: boolean; rows: number; market: string }>(`/api/indices/market/sync?market=${market}`, { method: 'POST' }),
+
+  // crypto "指数"（主流币; Bybit 实时, 无本地同步）
+  indicesCryptoList: () =>
+    request<{ results: IndexInstrument[]; count: number }>(`/api/indices/market/crypto/list`),
+  indicesCryptoQuotes: () =>
+    request<{ rows: IndexQuote[]; count: number }>(`/api/indices/market/crypto/quotes`),
+  indicesCryptoDaily: (symbol: string, days = 180) =>
+    request<{ symbol: string; rows: KlineRow[]; index_info: IndexInstrument | null }>(
+      `/api/indices/market/crypto/daily?symbol=${encodeURIComponent(symbol)}&days=${days}`,
+    ),
+  indicesCryptoMinute: (symbol: string) =>
+    request<{ symbol: string; rows: MinuteKlineRow[]; index_info: IndexInstrument | null }>(
+      `/api/indices/market/crypto/minute?symbol=${encodeURIComponent(symbol)}`,
+    ),
 
   // 港美股数据版复盘（多市场扩展，不依赖 AI）
   marketRecapData: (market: 'hk' | 'us') =>
@@ -2435,6 +2511,26 @@ export const api = {
   newsFlash: (limit = 50) =>
     request<{ items: NewsFlashItem[]; total: number }>(`/api/news/flash?limit=${limit}`),
 
+  /** 板块简报: 由真实行情选出利好/利空板块(只读缓存里的 AI 文案) */
+  sectorBrief: (kind: 'concept' | 'industry' = 'concept', topN = 5) =>
+    request<SectorBriefData>(`/api/news/sector-brief?kind=${kind}&top_n=${topN}`),
+
+  /** 为当日板块简报生成 AI 驱动逻辑文案(同一交易日命中后端缓存) */
+  sectorBriefNarrate: (kind: 'concept' | 'industry' = 'concept', topN = 5) =>
+    request<SectorBriefData>('/api/news/sector-brief/narrate', {
+      method: 'POST',
+      body: JSON.stringify({ kind, top_n: topN }),
+    }),
+
+  /** 7x24 快讯 + 利好/利空方向标签 + 关联板块/标的 */
+  flashTagged: (limit = 200) =>
+    request<{ items: FlashTaggedItem[]; total: number } & FlashLiveMeta>(
+      `/api/news/flash-tagged?limit=${limit}`,
+    ),
+
+  /** 7x24 快讯实时抓取状态(抓取节奏 / 累计新增 / 连续失败原因) */
+  newsLiveStatus: () => request<NewsLiveStatus>('/api/news/live-status'),
+
   aiGenerateTomorrow: (target_date?: string, prompt?: string) =>
     request<{ status: string; items: TomorrowCatalystItem[]; raw?: string }>('/api/news/ai-generate', {
       method: 'POST',
@@ -2611,6 +2707,15 @@ export const api = {
   lhbBranchStats: (days: number = 5) => request<LhbBranchStat[]>(`/api/lhb/branch-stats?days=${days}`),
   lhbInstitutionStats: (days: number = 5) => request<LhbInstitutionStat[]>(`/api/lhb/institution-stats?days=${days}`),
   lhbInstitutionDetails: () => request<LhbInstitutionDetail[]>('/api/lhb/institution-details'),
+
+  // ===== 智兔 5分钟涨速排行榜 =====
+  speedRankTop50: (params?: { limit?: number; sort_by?: 'speed_5m' | 'speed' | 'change_pct' }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit) qs.set('limit', String(params.limit))
+    if (params?.sort_by) qs.set('sort_by', params.sort_by)
+    const s = qs.toString()
+    return request<SpeedRankResponse>(`/api/speed-rank/top50${s ? `?${s}` : ''}`)
+  },
 }
 
 export interface LhbDailyStockItem {
@@ -2837,6 +2942,118 @@ export interface NewsFlashItem {
   title: string
   content: string
   url?: string
+  /** 上游不可用时的兜底示例文案标记 —— 页面需与真实快讯区分展示 */
+  is_fallback?: boolean
+}
+
+// ===== 板块简报(/news 资讯页) =====
+export interface SectorBriefStock {
+  symbol: string
+  name: string
+  change_pct?: number | null
+}
+
+export interface SectorBriefLeader {
+  symbol?: string
+  name?: string
+  change_pct?: number | null
+}
+
+/** 归因维度: 消息面 / 政策产业 / 盘面题材 / 外围指数 */
+export type SectorDriverKey = 'news' | 'policy' | 'market' | 'overseas'
+
+export interface SectorBriefDriver {
+  key: SectorDriverKey
+  label: string
+  /** 整数百分比, 同一张卡片各维度合计 100 */
+  weight: number
+  text: string
+}
+
+export interface SectorBriefFlash {
+  id: string
+  /** "YYYY-MM-DD HH:MM:SS" */
+  time: string
+  title: string
+  url: string
+  source: string
+  direction: 'bullish' | 'bearish' | 'neutral'
+  category: 'news' | 'policy'
+}
+
+export interface SectorBriefCard {
+  name: string
+  /** 小数制: 0.0431 = +4.31% */
+  change_pct: number
+  rank?: number | null
+  prev_rank?: number | null
+  rank_change?: number | null
+  /** 0-100 热度分: 当日涨跌幅 60% + 窗口内排名变化 40% */
+  heat: number
+  count: number
+  up_count: number
+  down_count: number
+  amount: number
+  leader?: SectorBriefLeader | null
+  /** 关联标的: 利好取涨幅前 3, 利空取跌幅前 3 */
+  stocks: SectorBriefStock[]
+  /** 窗口内累计涨幅(小数制), 无矩阵数据时为 null */
+  window_pct?: number | null
+  /** 数据派生文案(始终存在) */
+  logic_stats: string
+  /** 一句话驱动摘要(数据派生, AI 生成后覆盖) */
+  headline?: string | null
+  /** 四维归因分解: 维度缺失代表当天没有该类证据, 不是 0 权重 */
+  drivers?: SectorBriefDriver[]
+  /** 与该板块真正相关的真实快讯(带时间/来源/链接) */
+  flash?: SectorBriefFlash[]
+  /** AI 驱动逻辑(未生成时为 null, 前端降级显示 logic_stats) */
+  ai_logic?: string | null
+}
+
+export interface SectorBriefData {
+  as_of: string | null
+  kind: 'concept' | 'industry'
+  member_count: number
+  days: number
+  bullish: SectorBriefCard[]
+  bearish: SectorBriefCard[]
+  generated_at: string
+  ai_status: 'cached' | 'generated' | 'missing' | 'unavailable'
+  ai_generated_at: string | null
+  ai_configured: boolean
+}
+
+export interface FlashTaggedItem extends NewsFlashItem {
+  direction: 'bullish' | 'bearish' | 'neutral'
+  sectors: string[]
+  symbols: { name: string; symbol?: string }[]
+}
+
+/** 快讯滚动池的新鲜度元信息 —— 后端子服务端持续抓取, 前端据此显示「实时更新」 */
+export interface FlashLiveMeta {
+  /** 滚动池最后一次成功拿到上游内容的时刻 */
+  updated_at?: string | null
+  server_time?: string
+  /** 服务端抓取节奏(秒); 0 = 没有后台抓取器, 退化为按需拉取 */
+  poll_interval_seconds?: number
+}
+
+/** /api/news/live-status —— 抓取器运行状态(诊断用) */
+export interface NewsLiveStatus extends FlashLiveMeta {
+  running: boolean
+  enabled: boolean
+  interval_seconds: number
+  cycles?: number
+  total_new?: number
+  last_new_count?: number
+  last_poll_at?: string | null
+  last_pushed_at?: string | null
+  consecutive_errors?: number
+  last_error?: string | null
+  stored?: number
+  latest_flash_time?: string | null
+  beijing_time?: string
 }
 
 export interface CatalystSchedulerStatus {

@@ -371,7 +371,7 @@ async def analyze_rotation_stream(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.5,
-            max_tokens=4000,
+            max_tokens=12000,
         ):
             yield json.dumps({"type": "delta", "content": delta}, ensure_ascii=False)
 

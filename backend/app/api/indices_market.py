@@ -2,6 +2,9 @@
 
 数据来自腾讯免费接口（TickFlow 免费模式无港美股指数），由
 services/index_sync_market.sync_market_indices 同步到本地。
+
+crypto 市场：实时交易所公开数据（Bybit 优先，services/crypto_klines），
+无本地存储、无需同步；list/quotes 走 /v5/market/tickers，daily/minute 走 K 线接口。
 """
 from __future__ import annotations
 
@@ -17,9 +20,101 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/indices/market", tags=["indices-market"])
 
+# crypto "指数" 固定清单（主流币，前端置顶展示; symbols 与交易所现货对一致）
+_CRYPTO_PINNED = [
+    {"symbol": "BTCUSDT", "name": "比特币"},
+    {"symbol": "ETHUSDT", "name": "以太坊"},
+    {"symbol": "SOLUSDT", "name": "Solana"},
+    {"symbol": "BNBUSDT", "name": "BNB"},
+    {"symbol": "DOGEUSDT", "name": "狗狗币"},
+]
+
+
+# ================================================================
+# crypto 分支: 与港美股端点同构, 数据全部实时来自交易所 (无本地 parquet)
+# ================================================================
+
+def _crypto_quote_rows(symbols: list[dict] | None = None) -> list[dict]:
+    """crypto 清单 + 实时行情 (Bybit tickers; 失败时行情字段为空但不炸接口)。"""
+    from app.services import crypto_klines
+    pins = symbols or _CRYPTO_PINNED
+    tickers = {t["symbol"]: t for t in crypto_klines.fetch_crypto_tickers()}
+    out = []
+    for item in pins:
+        t = tickers.get(item["symbol"])
+        if t:
+            out.append({
+                "symbol": item["symbol"], "name": item["name"],
+                "date": "", "close": t["last"], "last_price": t["last"],
+                "change_pct": t["change_pct"], "pct": t["change_pct"],
+            })
+        else:
+            out.append({"symbol": item["symbol"], "name": item["name"],
+                        "date": "", "close": None, "last_price": None,
+                        "change_pct": None, "pct": None})
+    return out
+
+
+@router.get("/crypto/list")
+def crypto_indices_list():
+    """crypto 指数清单（对齐 /list 返回格式; 固定主流币清单）。"""
+    return {"results": [dict(item, asset_type="crypto") for item in _CRYPTO_PINNED], "count": len(_CRYPTO_PINNED)}
+
+
+@router.get("/crypto/quotes")
+def crypto_indices_quotes():
+    """crypto 实时行情（对齐 /quotes 返回格式; Bybit 24h ticker）。"""
+    rows = _crypto_quote_rows()
+    return {"rows": rows, "count": len(rows)}
+
+
+@router.get("/crypto/daily")
+def crypto_indices_daily(symbol: str = Query(...), days: int = Query(180, ge=30, le=800)):
+    """crypto 日K（对齐 /daily 返回格式; 交易所实时日K, 含今天未收盘根）。"""
+    from datetime import date as _date
+    from app.services import crypto_klines
+    if not crypto_klines.is_crypto_symbol(symbol):
+        raise HTTPException(status_code=400, detail="symbol 不是加密货币形态")
+    days_n = int(getattr(days, "default", 180)) if type(days).__name__ == "Query" else int(days)
+    end = _date.today()
+    start = end - timedelta(days=days_n)
+    try:
+        rows = crypto_klines.fetch_crypto_daily(symbol, start, end)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("crypto daily failed: %s", e)
+        rows = []
+    pretty = symbol[:-4] + "/USDT" if symbol.upper().endswith("USDT") else symbol
+    name = next((i["name"] for i in _CRYPTO_PINNED if i["symbol"] == symbol.upper()), pretty)
+    return {"symbol": symbol, "rows": rows, "index_info": {"symbol": symbol, "name": name}}
+
+
+@router.get("/crypto/minute")
+def crypto_indices_minute(symbol: str = Query(...)):
+    """crypto 分时（对齐 /minute 返回格式; 最近 242 根 1m K, UTC）。"""
+    from app.services import crypto_klines
+    if not crypto_klines.is_crypto_symbol(symbol):
+        raise HTTPException(status_code=400, detail="symbol 不是加密货币形态")
+    try:
+        df = crypto_klines.fetch_crypto_minute_recent(symbol)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("crypto minute failed: %s", e)
+        df = crypto_klines.fetch_crypto_klines(symbol, "1m", 0, 0)  # 空 schema df
+    rows = [
+        {"datetime": r["datetime"].isoformat(sep="T"), "open": r["open"], "high": r["high"],
+         "low": r["low"], "close": r["close"], "volume": r["volume"], "amount": r["amount"]}
+        for r in df.to_dicts()
+    ]
+    return {"symbol": symbol, "rows": rows, "index_info": None}
+
+
+@router.post("/crypto/sync")
+def crypto_indices_sync():
+    """crypto 无需同步（实时读取），占位对齐 /sync 语义。"""
+    return {"ok": True, "rows": 0, "market": "crypto"}
+
 
 @router.get("")
-def market_indices(request: Request, market: str = Query("hk", description="hk|us")):
+def market_indices(request: Request, market: str = Query("hk", description="hk|us|crypto")):
     """港美股指数清单 + 最新收盘/涨跌幅。"""
     if market not in ("hk", "us"):
         raise HTTPException(status_code=400, detail="market 必须为 hk|us")

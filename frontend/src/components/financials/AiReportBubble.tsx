@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, forwardRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Loader2, Check, AlertCircle } from 'lucide-react'
 import { useActiveTasks, restoreDialog } from '@/lib/aiReportStore'
@@ -150,12 +150,11 @@ export function AiReportBubble() {
   )
 }
 
-// ===== 单个胶囊卡片(紧凑玻璃拟态) =====
-function BubbleItem({ task, isLast, onPointerDown }: {
+const BubbleItem = forwardRef<HTMLDivElement, {
   task: ActiveTask
   isLast: boolean
   onPointerDown: () => void
-}) {
+}>(function BubbleItem({ task, isLast, onPointerDown }, ref) {
   const isWorking = task.phase === 'loading' || task.phase === 'streaming'
   const isError = task.phase === 'error'
 
@@ -164,10 +163,11 @@ function BubbleItem({ task, isLast, onPointerDown }: {
     ? 'from-purple-500/25 to-fuchsia-500/20 text-purple-300 border-purple-300/40 shadow-[0_6px_24px_-10px_rgba(168,85,247,0.5)]'
     : isError
       ? 'from-red-500/20 to-red-500/10 text-red-300 border-red-300/40 shadow-[0_6px_20px_-10px_rgba(239,68,68,0.4)]'
-      : 'from-emerald-500/20 to-emerald-500/10 text-emerald-300 border-emerald-300/40 shadow-[0_6px_20px_-10px_rgba(16,185,129,0.35)]'
+      : 'from-emerald-500/20 to-emerald-500/10 text-emerald-300 border-emerald-300/40 shadow-[0_6px_20px_-10px_rgba(160,185,129,0.35)]'
 
   return (
     <motion.div
+      ref={ref}
       initial={{ opacity: 0, scale: 0.9, y: -8 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9, y: -8 }}
@@ -226,7 +226,7 @@ function BubbleItem({ task, isLast, onPointerDown }: {
       `}</style>
     </motion.div>
   )
-}
+})
 
 // ===== 位置持久化 =====
 const POS_KEY = 'ai_bubble_pos'

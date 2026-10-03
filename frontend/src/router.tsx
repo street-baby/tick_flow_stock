@@ -27,9 +27,13 @@ const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.S
 const Indices = lazy(() => import('./pages/Indices').then(m => ({ default: m.Indices })))
 const Regime = lazy(() => import('./pages/Regime').then(m => ({ default: m.Regime })))
 const TomorrowCatalyst = lazy(() => import('./pages/TomorrowCatalyst').then(m => ({ default: m.TomorrowCatalyst })))
+const NewsBrief = lazy(() => import('./pages/NewsBrief').then(m => ({ default: m.NewsBrief })))
 const AuctionSnatch = lazy(() => import('./pages/AuctionSnatch').then(m => ({ default: m.AuctionSnatch })))
 const DarkPoolRanking = lazy(() => import('./pages/DarkPoolRanking').then(m => ({ default: m.DarkPoolRanking })))
 const TradePlan = lazy(() => import('./pages/TradePlan').then(m => ({ default: m.TradePlan })))
+const LongHuBang = lazy(() => import('./pages/LongHuBang').then(m => ({ default: m.LongHuBang })))
+const GameTheory = lazy(() => import('./pages/GameTheory'))
+const SpeedRank = lazy(() => import('./pages/SpeedRank').then(m => ({ default: m.SpeedRank })))
 const Dev = lazy(() => import('./pages/Dev').then(m => ({ default: m.Dev })))
 
 // 首次使用守卫 —— 未完成向导则重定向到 /onboarding
@@ -80,6 +84,7 @@ export const router = createBrowserRouter([
       { path: 'stock-analysis', element: <StockAnalysis /> },
       { path: 'review', element: <Review /> },
       { path: 'watchlist', element: <Watchlist /> },
+      { path: 'speed-rank', element: <SpeedRank /> },
       { path: 'screener', element: <Screener /> },
       { path: 'backtest', element: <Backtest /> },
       { path: 'financials', element: <Financials /> },
@@ -88,11 +93,14 @@ export const router = createBrowserRouter([
       { path: 'limit-ladder', element: <LimitUpLadder /> },
       { path: 'indices', element: <Indices /> },
     { path: 'regime', element: <Regime /> },
+      { path: 'news-brief', element: <NewsBrief /> },
       { path: 'tomorrow-catalysts', element: <TomorrowCatalyst /> },
       { path: 'auction', element: <AuctionSnatch /> },
+      { path: 'game-theory', element: <GameTheory /> },
       { path: 'darkpool', element: <DarkPoolRanking /> },
       { path: 'trade-plan', element: <TradePlan /> },
-      { path: 'news', element: <Navigate to="/tomorrow-catalysts" replace /> },
+      { path: 'longhubang', element: <LongHuBang /> },
+      { path: 'news', element: <Navigate to="/news-brief" replace /> },
       { path: 'branding', element: <Branding /> },
       { path: 'settings', element: <Settings /> },
       // 隐藏路由：开发者工具（不暴露在菜单，仅供调试）

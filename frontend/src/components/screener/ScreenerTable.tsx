@@ -271,7 +271,21 @@ export function ScreenerTable({
         const expanded = expandedCells.has(cellKey)
         return (
           <td key={col.id} className="px-3 py-2">
-            {renderTagList(tags, col, expanded, () => toggleExpand(cellKey), STRATEGY_TAG_CLS)}
+            <div className="flex flex-col gap-1 items-start">
+              {renderTagList(tags, col, expanded, () => toggleExpand(cellKey), STRATEGY_TAG_CLS)}
+              {r.bowl_category && (
+                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    {r.bowl_category}
+                  </span>
+                  {r.b1_matched_case && (
+                    <span className="text-[10px] text-muted truncate max-w-[140px]" title={r.b1_desc || r.b1_matched_case}>
+                      匹配: {r.b1_matched_case}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </td>
         )
       }
@@ -280,9 +294,19 @@ export function ScreenerTable({
         return (
           <td key={col.id} className={numCls}>
             {r.score != null ? (
-              <span className={r.score >= 70 ? 'text-accent font-medium' : r.score >= 50 ? 'text-amber-400' : 'text-secondary'}>
-                {Number(r.score).toFixed(1)}
-              </span>
+              <div className="flex flex-col items-end">
+                <span className={r.score >= 70 ? 'text-accent font-medium' : r.score >= 50 ? 'text-amber-400' : 'text-secondary'}>
+                  {Number(r.score).toFixed(1)}
+                </span>
+                {r.b1_similarity != null && (
+                  <span className={`text-[10px] font-semibold px-1 rounded mt-0.5 ${
+                    r.b1_similarity >= 85 ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' :
+                    r.b1_similarity >= 70 ? 'bg-blue-500/15 text-blue-300 border border-blue-500/20' : 'text-muted'
+                  }`} title={`B1形态相似度: ${r.b1_similarity}%`}>
+                    B1: {r.b1_similarity}%
+                  </span>
+                )}
+              </div>
             ) : (
               <span className="text-muted">—</span>
             )}

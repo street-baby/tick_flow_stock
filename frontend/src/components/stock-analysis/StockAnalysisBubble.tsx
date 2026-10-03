@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, forwardRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Loader2, Check, AlertCircle } from 'lucide-react'
 import { useBubbleTasks, restoreDialog } from '@/lib/stockAnalysisStore'
@@ -126,11 +126,11 @@ export function StockAnalysisBubble() {
   )
 }
 
-function BubbleItem({ task, isLast, onPointerDown }: {
+const BubbleItem = forwardRef<HTMLDivElement, {
   task: ActiveTask
   isLast: boolean
   onPointerDown: () => void
-}) {
+}>(function BubbleItem({ task, isLast, onPointerDown }, ref) {
   const isWorking = task.phase === 'loading' || task.phase === 'streaming'
   const isError = task.phase === 'error'
 
@@ -143,6 +143,7 @@ function BubbleItem({ task, isLast, onPointerDown }: {
 
   return (
     <motion.div
+      ref={ref}
       initial={{ opacity: 0, scale: 0.9, y: -8 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9, y: -8 }}
@@ -181,7 +182,7 @@ function BubbleItem({ task, isLast, onPointerDown }: {
       `}</style>
     </motion.div>
   )
-}
+})
 
 const POS_KEY = 'sa_bubble_pos'
 function loadPos(): { x: number; y: number } {

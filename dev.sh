@@ -10,6 +10,10 @@
 
 set -euo pipefail
 
+# 锁定系统时区为中国标准时间（北京时间 / 东八区 UTC+8）
+export TZ="Asia/Shanghai"
+export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT/backend"
 FRONTEND_DIR="$ROOT/frontend"

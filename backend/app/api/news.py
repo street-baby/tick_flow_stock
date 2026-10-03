@@ -10,7 +10,12 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.services.news_service import NewsService
+from app.services.news_service import NewsService, flash_feed
+from app.services.sector_brief import (
+    SectorBriefAIError,
+    build_sector_brief,
+    narrate_sector_brief,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +46,19 @@ class MorningBriefGenerateRequest(BaseModel):
 def _get_news_service(request: Request) -> NewsService:
     data_dir = request.app.state.repo.store.data_dir
     return NewsService(data_dir=data_dir)
+
+
+def _flash_live_meta(request: Request) -> dict:
+    """快讯新鲜度元信息: 池子最后更新时间 + 抓取节奏。
+
+    前端用它显示「实时更新 · 刚刚 / 12 秒前」, 而不是盲猜数据新旧。
+    """
+    poller = getattr(request.app.state, "news_poller", None)
+    interval = poller.interval if poller is not None else 0.0
+    return {
+        **NewsService.flash_meta(),
+        "poll_interval_seconds": round(float(interval or 0.0), 1),
+    }
 
 
 @router.get("/tomorrow")
@@ -82,10 +100,91 @@ def get_live_flash(
     request: Request,
     limit: int = Query(50, ge=1, le=200),
 ):
-    """获取 7x24 实时财经快讯。"""
+    """获取 7x24 实时财经快讯(服务端滚动累积, 不只是一个 50 条的滑动窗口)。"""
     svc = _get_news_service(request)
     items = svc.fetch_live_flash(limit=limit)
-    return {"items": items, "total": len(items)}
+    return {"items": items, "total": len(items), **_flash_live_meta(request)}
+
+
+class SectorBriefNarrateRequest(BaseModel):
+    kind: str = "concept"
+    top_n: int = 5
+
+
+@router.get("/sector-brief")
+def get_sector_brief(
+    request: Request,
+    kind: str = Query("concept", pattern="concept|industry", description="维度: concept 概念 / industry 行业"),
+    top_n: int = Query(5, ge=3, le=10, description="利好/利空各取前 N 个板块"),
+):
+    """板块简报: 由真实行情选出利好/利空板块(含四维归因/关联快讯/关联标的)。
+
+    只读缓存里的 AI 文案, 不触发 LLM 调用; ai_status 表明当前状态:
+    cached(有当日文案) / missing(未生成) / unavailable(无 AI 或数据为空)。
+    快讯池来自 NewsService(多源合并, 进程内缓存), 池子为空时只出盘面/外围维度。
+    """
+    repo = request.app.state.repo
+    return build_sector_brief(repo, kind=kind, top_n=top_n, news_service=_get_news_service(request))
+
+
+@router.post("/sector-brief/narrate")
+async def narrate_sector_brief_api(
+    req: SectorBriefNarrateRequest,
+    request: Request,
+):
+    """为当日板块简报生成 AI 驱动归因文案(同一交易日命中缓存不重复调用)。
+
+    AI 未配置 / 调用失败 / 返回无法解析 → 502, 前端降级显示数据派生归因。
+    """
+    repo = request.app.state.repo
+    try:
+        return await narrate_sector_brief(
+            repo,
+            kind=req.kind,
+            top_n=req.top_n,
+            news_service=_get_news_service(request),
+        )
+    except SectorBriefAIError as exc:
+        logger.warning("板块简报 AI 文案不可用: %s", exc)
+        raise HTTPException(status_code=502, detail=f"AI 板块研判生成失败: {exc}") from exc
+
+
+@router.get("/flash-tagged")
+def get_flash_tagged(
+    request: Request,
+    limit: int = Query(200, ge=1, le=300),
+):
+    """7x24 快讯 + 利好/利空方向标签 + 关联板块/标的。
+
+    返回里带 updated_at / poll_interval_seconds —— 前端据此显示「实时更新」状态。
+    """
+    from app.services.flash_classifier import load_lexicon, tag_flash_items
+
+    svc = _get_news_service(request)
+    items = svc.fetch_live_flash(limit=limit)
+    lexicon = load_lexicon(request.app.state.repo)
+    tagged = tag_flash_items(items, lexicon)
+    return {"items": tagged, "total": len(tagged), **_flash_live_meta(request)}
+
+
+@router.get("/live-status")
+def get_news_live_status(request: Request):
+    """7x24 快讯实时抓取状态: 抓取节奏/累计新增/连续失败数与最近错误。
+
+    无 NewsPoller(未启动或已关闭)时退化为只报滚动池现状 —— 此时快讯靠
+    读取路径的兜底同步抓取, 仍然是「不断更新」, 只是节奏跟请求走。
+    """
+    poller = getattr(request.app.state, "news_poller", None)
+    if poller is not None:
+        return poller.get_status()
+    return {
+        "running": False,
+        "enabled": False,
+        "interval_seconds": 0.0,
+        "stored": len(flash_feed),
+        "latest_flash_time": flash_feed.latest_time(),
+        **_flash_live_meta(request),
+    }
 
 
 @router.get("/morning-brief")
@@ -219,3 +318,35 @@ async def ai_generate_tomorrow(
             logger.warning("解析 AI 返回 JSON 失败: %s", e)
 
     return {"status": "partial", "items": [], "raw": raw_reply}
+
+
+def _get_catalyst_scheduler(request: Request):
+    sched = getattr(request.app.state, "catalyst_scheduler", None)
+    if not sched:
+        from app.services.catalyst_scheduler import TomorrowCatalystScheduler
+        data_dir = request.app.state.repo.store.data_dir
+        sched = TomorrowCatalystScheduler(data_dir=data_dir)
+        request.app.state.catalyst_scheduler = sched
+    return sched
+
+
+@router.get("/status")
+def get_catalyst_scheduler_status(request: Request):
+    """获取明天炒什么题材前瞻调度器的自动运行状态。"""
+    sched = _get_catalyst_scheduler(request)
+    return sched.get_status()
+
+
+@router.post("/trigger-now")
+async def trigger_catalyst_analysis_now(
+    request: Request,
+    mode: str = Query("30min", description="模式: '30min' 滚动分析 或 '2355' 全天终极汇总"),
+):
+    """即刻触发一次滚动分析或全天终极汇总。"""
+    sched = _get_catalyst_scheduler(request)
+    if mode == "2355":
+        res = await sched.run_2355_daily_synthesis(force=True)
+    else:
+        res = await sched.run_30min_cycle(force=True)
+    return res
+

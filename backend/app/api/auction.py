@@ -27,8 +27,13 @@ def screen_auction_snatch(
     include_star: bool = Query(True, description="是否包含科创板 (688/689)"),
     only_doji: bool = Query(False, description="仅筛选十字星形态"),
     use_realtime: bool = Query(True, description="优先使用 9:25 智兔实时行情快照"),
+    only_high_winrate: bool = Query(False, description="仅筛选胜率65%+精选先锋龙头 (Top 5)"),
+    require_catalyst: bool = Query(False, description="仅筛选具有公告或舆情题材催化的标的"),
+    exclude_bear_announcements: bool = Query(True, description="自动排除减持/涉案利空公告标的"),
+    exclude_earnings_bear: bool = Query(True, description="自动排除业绩预亏/首亏预警标的"),
+    require_earnings_bull: bool = Query(False, description="仅筛选业绩扭亏或预增标的"),
 ):
-    """执行 9:25 集合竞价抢筹选股"""
+    """执行 9:25 集合竞价抢筹选股（多因子胜率增强版）"""
     repo = request.app.state.repo
     svc = AuctionService(repo)
 
@@ -43,6 +48,11 @@ def screen_auction_snatch(
         include_star=include_star,
         only_doji=only_doji,
         use_realtime=use_realtime,
+        only_high_winrate=only_high_winrate,
+        require_catalyst=require_catalyst,
+        exclude_bear_announcements=exclude_bear_announcements,
+        exclude_earnings_bear=exclude_earnings_bear,
+        require_earnings_bull=require_earnings_bull,
     )
     return result
 
@@ -153,4 +163,47 @@ async def analyze_auction_snatch_logic(
                 for r in req.rows[:15]
             ],
         }
+
+
+@router.get("/latest-ai-snatch")
+def get_latest_ai_snatch_report(request: Request):
+    """获取最新持久化的 9:25 集合竞价抢筹与 AI 核心 5 只票深度推演报告。"""
+    auction_engine = getattr(request.app.state, "auction_engine", None)
+    if auction_engine:
+        return auction_engine.get_latest_report()
+
+    # 兜底直接读取本地落盘 json
+    import json
+    data_dir = getattr(request.app.state.store, "data_dir", None)
+    if data_dir:
+        f = data_dir / "user_data" / "auction_snatch_latest.json"
+        if f.exists():
+            try:
+                return json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+    return {"status": "empty", "message": "尚未生成竞价推演报告", "core_five_stocks": []}
+
+
+@router.post("/trigger-auto-snatch")
+async def trigger_auction_snatch_now(request: Request):
+    """手动即刻触发一次完整的 9:25 集合竞价选股与 AI 核心推演全流程。"""
+    auction_engine = getattr(request.app.state, "auction_engine", None)
+    if not auction_engine:
+        # 尝试现场初始化
+        repo = getattr(request.app.state, "repo", None)
+        if not repo:
+            raise HTTPException(status_code=500, detail="Repository 未就绪")
+        from app.services.auction_service import AuctionSnatchEngine
+        auction_engine = AuctionSnatchEngine(repo=repo, data_dir=request.app.state.store.data_dir, app_state=request.app.state)
+        request.app.state.auction_engine = auction_engine
+
+    import asyncio
+    asyncio.create_task(auction_engine.run_daily_auction_snatch(force=True))
+    return {
+        "status": "triggered",
+        "message": "9:25 竞价选股与 AI 核心 5 只票推演已在后台启动，预计耗时约 10-15 秒...",
+    }
+
 

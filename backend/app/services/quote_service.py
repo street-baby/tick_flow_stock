@@ -62,6 +62,8 @@ class QuoteSubscriber:
         self._quote_updated = False
         self._strategy_results_updated = False
         self._depth_updated = False
+        # 7x24 快讯新条目载荷(None = 本次无快讯事件); 由 NewsPoller 写入
+        self._news: dict | None = None
         self._alerts: list[dict] = []
         self._reviews: list[str] = []
 
@@ -77,12 +79,14 @@ class QuoteSubscriber:
                 "quote_updated": self._quote_updated,
                 "strategy_results_updated": self._strategy_results_updated,
                 "depth_updated": self._depth_updated,
+                "news": self._news,
                 "alerts": self._alerts,
                 "reviews": self._reviews,
             }
             self._quote_updated = False
             self._strategy_results_updated = False
             self._depth_updated = False
+            self._news = None
             self._alerts = []
             self._reviews = []
             self._event.clear()
@@ -103,6 +107,12 @@ class QuoteSubscriber:
                 self._reviews = self._reviews[-self._max_reviews:]
             self._event.set()
 
+    def push_news(self, payload: dict) -> None:
+        """推一条「7x24 快讯有新条目」信号(载荷给前端显示新增条数/最新时间)。"""
+        with self._lock:
+            self._news = dict(payload or {})
+            self._event.set()
+
     def clear_alerts(self) -> None:
         with self._lock:
             self._alerts = []
@@ -110,6 +120,7 @@ class QuoteSubscriber:
                 not self._quote_updated
                 and not self._strategy_results_updated
                 and not self._depth_updated
+                and self._news is None
                 and not self._reviews
             ):
                 self._event.clear()
@@ -368,6 +379,15 @@ class QuoteService:
         for sub in self._snapshot_subscribers():
             sub.notify_depth()
 
+    def notify_news_updated(self, payload: dict | None = None) -> None:
+        """7x24 快讯滚到新条目时调用: 推 news_updated, 前端只重取快讯查询。
+
+        与行情通道独立 —— 快讯节奏(默认 15s)跟行情轮询无关, 不能连带刷新行情页。
+        """
+        data = dict(payload or {})
+        for sub in self._snapshot_subscribers():
+            sub.push_news(data)
+
     def _broadcast_alerts(self, alerts: list[dict]) -> None:
         for sub in self._snapshot_subscribers():
             sub.push_alerts(alerts)
@@ -509,6 +529,7 @@ class QuoteService:
     # ================================================================
 
     def _poll_loop(self) -> None:
+        fail_count = 0
         while self._running and self._enabled:
             try:
                 # 管道/数据修正运行期间临时暂停取数, 防止与管道写同一批 parquet 竞态。
@@ -518,6 +539,10 @@ class QuoteService:
                     if self._should_fetch_for_phase(phase):
                         is_final = phase in {"morning_final", "close_final"}
                         ok = self._fetch_quotes(final=is_final)
+                        if ok:
+                            fail_count = 0
+                        else:
+                            fail_count += 1
                         if is_final:
                             key = self._final_sync_key(phase)
                             if key and ok:
@@ -528,12 +553,19 @@ class QuoteService:
                                 self._final_sync_failed[key] = "fetch_failed"
                                 logger.warning("%s 最终行情同步失败, 将继续重试", "午休" if phase == "morning_final" else "收盘")
                     else:
+                        fail_count = 0
                         logger.debug("非轮询阶段(%s), 跳过行情轮询", phase)
             except Exception as e:  # noqa: BLE001
+                fail_count += 1
                 logger.warning("行情轮询异常: %s", e)
 
+            # 自适应退避：若连续拉取失败（如 429 限流或网络异常），递增休眠时长，最高 25 秒
+            sleep_duration = self._interval
+            if fail_count >= 2:
+                sleep_duration = min(self._interval * min(fail_count, 4), 25.0)
+
             waited = 0.0
-            while self._running and self._enabled and waited < self._interval:
+            while self._running and self._enabled and waited < sleep_duration:
                 time.sleep(0.5)
                 waited += 0.5
 
@@ -673,12 +705,9 @@ class QuoteService:
             logger.warning("行情数据为空")
             return
 
-        index_records = [r for r in records if r.get("symbol") in all_index_symbols]
-        etf_records = [r for r in records if r.get("symbol") in all_etf_symbols]
-        stock_records = [
-            r for r in records
-            if r.get("symbol") not in all_index_symbols and r.get("symbol") not in all_etf_symbols
-        ]
+        index_records, etf_records, stock_records = self._split_records_by_asset(
+            records, all_index_symbols, all_etf_symbols
+        )
 
         fetch_ms = (time.perf_counter() - t0) * 1000
         fetched_at = time.time() * 1000
@@ -872,18 +901,42 @@ class QuoteService:
     def _split_records_by_asset(
         records: list[dict], index_set: set[str], etf_set: set[str],
     ) -> tuple[list[dict], list[dict], list[dict]]:
-        """把行情 records 按资产拆成 (index, etf, stock)。判定顺序与 resolve_asset_type 一致: 先 ETF 后指数。"""
+        """把行情 records 按资产拆成 (index, etf, stock)，并进行 symbol 去重。"""
         index_records: list[dict] = []
         etf_records: list[dict] = []
         stock_records: list[dict] = []
+        seen_stocks: set[str] = set()
+        seen_etfs: set[str] = set()
+        seen_indices: set[str] = set()
+
         for r in records:
-            sym = r.get("symbol")
-            if sym in etf_set:
-                etf_records.append(r)
-            elif sym in index_set:
-                index_records.append(r)
-            else:
-                stock_records.append(r)
+            sym = str(r.get("symbol") or "").strip()
+            if not sym:
+                continue
+            code_prefix = sym[:2]
+            is_index_code = (
+                sym in index_set
+                or sym.startswith("399")
+                or sym in ("000001.SH", "000300.SH", "000905.SH", "000852.SH", "000688.SH", "000680.SH", "000016.SH")
+            )
+            is_etf_code = (
+                sym in etf_set
+                or code_prefix in ("15", "51", "56", "58", "16", "50")
+            )
+            is_stock_code = code_prefix in ("60", "68", "00", "30", "43", "83", "87", "92")
+
+            if is_etf_code:
+                if sym not in seen_etfs:
+                    seen_etfs.add(sym)
+                    etf_records.append(r)
+            elif is_index_code:
+                if sym not in seen_indices:
+                    seen_indices.add(sym)
+                    index_records.append(r)
+            elif is_stock_code:
+                if sym not in seen_stocks:
+                    seen_stocks.add(sym)
+                    stock_records.append(r)
         return index_records, etf_records, stock_records
 
     @staticmethod

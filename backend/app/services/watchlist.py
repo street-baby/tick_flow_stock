@@ -1,12 +1,14 @@
 """自选股服务(§6.1)。
 
-存储:`data/user_data/watchlist.parquet`,字段 symbol + added_at + note。
+存储:`data/user_data/watchlist.parquet`, 字段 symbol + added_at + note + group。
+支持按板块分类/自定义分组进行自选股归类管理。
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -17,6 +19,13 @@ from app.tickflow.rate_limits import chunked, resolve_limit
 
 logger = logging.getLogger(__name__)
 
+SCHEMA = {
+    "symbol": pl.Utf8,
+    "added_at": pl.Utf8,
+    "note": pl.Utf8,
+    "group": pl.Utf8,
+}
+
 
 def _path() -> Path:
     p = settings.data_dir / "user_data" / "watchlist.parquet"
@@ -24,69 +33,151 @@ def _path() -> Path:
     return p
 
 
-def list_symbols() -> list[dict]:
+def _load_df() -> pl.DataFrame:
     p = _path()
     if not p.exists():
-        return []
-    df = pl.read_parquet(p)
+        return pl.DataFrame(schema=SCHEMA)
+    try:
+        df = pl.read_parquet(p)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("read watchlist.parquet failed, resetting: %s", e)
+        return pl.DataFrame(schema=SCHEMA)
+
+    # 兼容历史数据补全字段
+    if "group" not in df.columns:
+        df = df.with_columns(pl.lit("默认").alias("group"))
+    else:
+        df = df.with_columns(pl.col("group").fill_null("默认"))
+    if "note" not in df.columns:
+        df = df.with_columns(pl.lit("").alias("note"))
+    else:
+        df = df.with_columns(pl.col("note").fill_null(""))
+    return df
+
+
+def list_symbols(group: str | None = None) -> list[dict[str, Any]]:
+    df = _load_df()
     if df.is_empty():
         return []
+    if group and group not in ("", "全部"):
+        df = df.filter(pl.col("group") == group)
     return df.to_dicts()
 
 
-def add(symbol: str, note: str = "") -> list[dict]:
-    p = _path()
-    if p.exists():
-        df = pl.read_parquet(p)
-        # 已存在则先移除，后面重新插入到最前面
-        if symbol in df["symbol"].to_list():
-            df = df.filter(pl.col("symbol") != symbol)
+def list_groups() -> list[dict[str, Any]]:
+    """返回现有自选分组及数量统计。"""
+    df = _load_df()
+    if df.is_empty():
+        return [{"name": "全部", "count": 0}, {"name": "默认", "count": 0}]
+
+    group_counts: dict[str, int] = {}
+    for r in df.iter_rows(named=True):
+        g = r.get("group") or "默认"
+        group_counts[g] = group_counts.get(g, 0) + 1
+
+    out: list[dict[str, Any]] = [{"name": "全部", "count": df.height}]
+    if "默认" in group_counts:
+        out.append({"name": "默认", "count": group_counts.pop("默认")})
     else:
-        df = pl.DataFrame(schema={"symbol": pl.Utf8, "added_at": pl.Utf8, "note": pl.Utf8})
+        out.append({"name": "默认", "count": 0})
+
+    for g, cnt in sorted(group_counts.items(), key=lambda x: x[0]):
+        out.append({"name": g, "count": cnt})
+    return out
+
+
+def add(symbol: str, note: str = "", group: str = "默认") -> list[dict[str, Any]]:
+    p = _path()
+    df = _load_df()
+    grp = group or "默认"
+    # 若同一分组已存在该 symbol，先过滤掉，之后重新插入到最前面
+    df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("group") == grp)))
 
     new_row = pl.DataFrame({
         "symbol": [symbol],
         "added_at": [datetime.utcnow().isoformat(timespec="seconds")],
         "note": [note],
+        "group": [grp],
     })
     out = pl.concat([new_row, df], how="diagonal_relaxed")
     out.write_parquet(p)
     return out.to_dicts()
 
 
-def remove(symbol: str) -> list[dict]:
+def batch_upsert_grouped(records: list[dict[str, str]]) -> int:
+    """批量更新分组自选记录（用于板块核心股票一键导入）。"""
+    if not records:
+        return 0
     p = _path()
-    if not p.exists():
+    df = _load_df()
+    now_iso = datetime.utcnow().isoformat(timespec="seconds")
+
+    # 找出本次更新涉及的板块分组
+    update_groups = {r.get("group", "默认") for r in records}
+
+    # 保留不属于更新分组中的历史数据（如用户自己的“默认”分组标的）
+    if not df.is_empty():
+        preserved = df.filter(~pl.col("group").is_in(list(update_groups)))
+    else:
+        preserved = pl.DataFrame(schema=SCHEMA)
+
+    new_df = pl.DataFrame({
+        "symbol": [r["symbol"] for r in records],
+        "added_at": [now_iso for _ in records],
+        "note": [r.get("note", "") for r in records],
+        "group": [r.get("group", "默认") for r in records],
+    })
+
+    out = pl.concat([preserved, new_df], how="diagonal_relaxed")
+    out.write_parquet(p)
+    return len(records)
+
+
+def remove(symbol: str, group: str | None = None) -> list[dict[str, Any]]:
+    p = _path()
+    df = _load_df()
+    if df.is_empty():
         return []
-    df = pl.read_parquet(p)
-    df = df.filter(pl.col("symbol") != symbol)
+    if group and group not in ("", "全部"):
+        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("group") == group)))
+    else:
+        df = df.filter(pl.col("symbol") != symbol)
     df.write_parquet(p)
     return df.to_dicts()
 
 
-def move_to_top(symbol: str) -> list[dict]:
+def move_to_top(symbol: str, group: str | None = None) -> list[dict[str, Any]]:
     p = _path()
-    if not p.exists():
+    df = _load_df()
+    if df.is_empty():
         return []
-    df = pl.read_parquet(p)
-    if df.is_empty() or symbol not in df["symbol"].to_list():
+    cond = (pl.col("symbol") == symbol)
+    if group and group not in ("", "全部"):
+        cond = cond & (pl.col("group") == group)
+
+    target = df.filter(cond)
+    if target.is_empty():
         return df.to_dicts()
-    target = df.filter(pl.col("symbol") == symbol)
-    rest = df.filter(pl.col("symbol") != symbol)
+    rest = df.filter(~cond)
     out = pl.concat([target, rest], how="diagonal_relaxed")
     out.write_parquet(p)
     return out.to_dicts()
 
 
-def clear() -> int:
-    """清空自选列表。返回移除的数量。"""
+def clear(group: str | None = None) -> int:
+    """清空自选列表（支持清空全部或指定分组）。返回移除的数量。"""
     p = _path()
-    if not p.exists():
+    df = _load_df()
+    if df.is_empty():
         return 0
-    df = pl.read_parquet(p)
+    if group and group not in ("", "全部"):
+        remaining = df.filter(pl.col("group") != group)
+        count = df.height - remaining.height
+        remaining.write_parquet(p)
+        return count
+
     count = df.height
-    if count > 0:
-        pl.DataFrame(schema={"symbol": pl.Utf8, "added_at": pl.Utf8, "note": pl.Utf8}).write_parquet(p)
+    pl.DataFrame(schema=SCHEMA).write_parquet(p)
     return count
 
 

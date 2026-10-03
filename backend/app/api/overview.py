@@ -421,7 +421,7 @@ def _build_overview(request: Request, as_of: date | None = None) -> dict:
 def market_overview(request: Request, as_of: date | None = None, market: str = "cn"):
     """总览页单次请求聚合数据，避免前端拉全市场明细后再计算。
 
-    market: cn | hk | us（多市场扩展；港美股走 build_market_overview_market）。
+    market: cn | hk | us | crypto（多市场扩展；港美股与加密货币走 build_market_overview_market）。
     """
     global _cache, _cache_key, _cache_ts
     now = time.time()
@@ -431,7 +431,7 @@ def market_overview(request: Request, as_of: date | None = None, market: str = "
         if _cache is not None and _cache_key == cache_key and (now - _cache_ts) < _CACHE_TTL:
             return _cache
     # 装配在锁外进行 (耗时), 允许并发未命中时各自构建, 不长时间持锁串行化请求
-    if market in ("hk", "us"):
+    if market in ("hk", "us", "crypto"):
         from app.services.market_overview_builder import build_market_overview_market
         data = build_market_overview_market(
             repo=request.app.state.repo,

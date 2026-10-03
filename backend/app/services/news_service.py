@@ -7,16 +7,32 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+import threading
 import time
-from datetime import date, datetime, timedelta
+from collections.abc import Iterable
+from datetime import date, datetime, time as dt_time, timedelta
 from pathlib import Path
 from typing import Any, List, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# 多源快讯合并池: 板块归因需要「足够长的候选集」(单源最新 20 条覆盖不到交易日的催化)
+_POOL_TTL = 300.0
+
+# 7x24 快讯滚动池: 上游每次只回最近 50 条, 靠「每次请求现拉一次」的旧做法页面
+# 永远只看得到那个 50 条的滑动窗口。这里由服务端按固定节奏持续抓取累积,
+# 前端读的是连续时间线, 而不是一个不断被覆盖的窗口。
+_FLASH_STORE_CAP = 800
+_FLASH_RETENTION_HOURS = 48
+# 池子超过这个时间没被更新时的兜底同步刷新(没有 poller 的场景: 测试 / CLI)
+_FLASH_REFRESH_TTL = 15.0
+# 落盘节流: 每条新快讯都写盘会打满磁盘, 但丢进程会损失几分钟时间线
+_FLASH_SAVE_MIN_INTERVAL = 60.0
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -32,6 +48,245 @@ def _clean_text(s: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+def _coerce_dt(value: Any, date_part: Any = None) -> Optional[datetime]:
+    """把各源五花八门的时间字段统一成 datetime。
+
+    已见形态: 东财/富途/同花顺/新浪给字符串 "2026-09-20 23:01:24",
+    财联社给 date(发布日期) + time(发布时间) 两列。解析不了就返回 None(调用方丢弃)。
+    """
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        # 财联社形态: 日期在 value, 时间在 date_part
+        clock = date_part if isinstance(date_part, dt_time) else dt_time.min
+        return datetime.combine(value, clock)
+    if isinstance(value, dt_time):
+        base = date_part if isinstance(date_part, date) else date.today()
+        return datetime.combine(base, value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _news_title(title: Any, content: str) -> str:
+    """标题缺失时从正文里取「【…】」或首句, 不把空标题的条目丢掉。"""
+    text = _clean_text(str(title or ""))
+    if text:
+        return text
+    if content.startswith("【") and "】" in content:
+        return content[1 : content.index("】")].strip()
+    return content[:48].strip()
+
+
+def _news_id(source: str, title: str) -> str:
+    return hashlib.sha1(f"{source}|{title}".encode()).hexdigest()[:12]
+
+
+# 同一事件在不同源里的标题前缀: 财联社「X月X日电，」、「据…报道，」
+_TITLE_LEAD = re.compile(r"^(?:财联社\d{1,2}月\d{1,2}日电[，,：:]?|据[^，,]{0,10}报道[，,]?)")
+# 新浪把标题包在【】里: 方括号本身要去掉, 但括号里的字是标题正文, 不能一起删
+_TITLE_BRACKETS = re.compile(r"[【】\[\]]")
+_TITLE_MIN_OVERLAP = 12
+
+
+def _title_key(title: str) -> str:
+    """归一化标题: 去源前缀、去方括号与标点空白, 用于识别同一事件的多源重复。"""
+    text = _TITLE_LEAD.sub("", str(title or "").strip())
+    text = _TITLE_BRACKETS.sub("", text)
+    return re.sub(r"[\s\W_]+", "", text)
+
+
+def _same_story(key: str, kept: list[str]) -> bool:
+    """同一事件的判定: 归一化后互为前缀/包含(长度足够时)。"""
+    if len(key) < _TITLE_MIN_OVERLAP:
+        return key in kept
+    return any(key in other or other in key for other in kept)
+
+
+def _iso(ts: float | None) -> str | None:
+    """epoch 秒 → 本地 'YYYY-MM-DD HH:MM:SS'(0 / None → None)。"""
+    if not ts:
+        return None
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _normalize_flash(raw: Any) -> dict | None:
+    """上游快讯 → 池子统一结构。缺 id 时按来源+标题派生, 避免同一事件反复入库。"""
+    if not isinstance(raw, dict):
+        return None
+    title = _clean_text(str(raw.get("title") or ""))
+    content = _clean_text(str(raw.get("content") or ""))
+    if not title and not content:
+        return None
+    ident = str(raw.get("id") or "").strip()
+    if not ident:
+        ident = _news_id(str(raw.get("source") or raw.get("tag") or "快讯"), title or content[:32])
+    item: dict = {
+        "id": ident,
+        "time": str(raw.get("time") or "").strip(),
+        "tag": str(raw.get("tag") or "").strip(),
+        "title": title or content[:48],
+        "content": content,
+        "url": str(raw.get("url") or "").strip(),
+    }
+    if raw.get("is_fallback"):
+        item["is_fallback"] = True
+    return item
+
+
+class FlashFeed:
+    """进程级 7x24 快讯滚动池 — 去重 / 排序 / 截断 / 落盘。
+
+    线程安全: poller 线程持续写, 请求线程(可能多个)读。
+    只存真实抓回来的条目 —— 上游不可用时的兜底示例文案不进池子(否则会被
+    当成资讯长期留在时间线里)。
+    """
+
+    def __init__(self, cap: int = _FLASH_STORE_CAP, retention_hours: int = _FLASH_RETENTION_HOURS) -> None:
+        self._cap = cap
+        self._retention_hours = retention_hours
+        self._lock = threading.RLock()
+        self._items: list[dict] = []
+        self._ids: set[str] = set()
+        self._updated_at: float = 0.0
+        self._attempt_at: float = 0.0
+        self._saved_at: float = 0.0
+        self._last_error: str | None = None
+
+    # ── 读 ──
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._items)
+
+    @property
+    def updated_at(self) -> float:
+        """最近一次成功拿到上游内容的时刻(0 = 从未成功)。"""
+        with self._lock:
+            return self._updated_at
+
+    @property
+    def attempt_at(self) -> float:
+        """最近一次抓取尝试的时刻(含失败)。"""
+        with self._lock:
+            return self._attempt_at
+
+    @property
+    def last_error(self) -> str | None:
+        with self._lock:
+            return self._last_error
+
+    def items(self, limit: int | None = None) -> list[dict]:
+        """按时间倒序快照; limit=None 返回整个池子。"""
+        with self._lock:
+            if limit is None or limit >= len(self._items):
+                return list(self._items)
+            return self._items[: max(0, limit)]
+
+    def latest_time(self) -> str | None:
+        with self._lock:
+            return str(self._items[0].get("time")) if self._items else None
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items = []
+            self._ids = set()
+            self._updated_at = 0.0
+            self._attempt_at = 0.0
+            self._last_error = None
+
+    # ── 写 ──
+    def merge(self, rows: Iterable[Any]) -> list[dict]:
+        """并入一批上游快讯, 返回本次新增条目(时间倒序)。只在抓取成功时调用。"""
+        moment = time.time()
+        added: list[dict] = []
+        with self._lock:
+            self._attempt_at = moment
+            self._updated_at = moment
+            self._last_error = None
+            for raw in rows or []:
+                item = _normalize_flash(raw)
+                if item is None or item["id"] in self._ids:
+                    continue
+                self._ids.add(item["id"])
+                self._items.append(item)
+                added.append(item)
+            self._trim(moment)
+        added.sort(key=lambda it: str(it.get("time") or ""), reverse=True)
+        return added
+
+    def note_failure(self, error: str) -> None:
+        """抓取失败: 记尝试时刻与原因, 不动 updated_at(前端据此知道数据没在刷新)。"""
+        with self._lock:
+            self._attempt_at = time.time()
+            self._last_error = str(error)[:200]
+
+    def _trim(self, moment: float) -> None:
+        cutoff = moment - self._retention_hours * 3600
+        kept: list[dict] = []
+        for item in self._items:
+            parsed = _coerce_dt(item.get("time"))
+            # 解析不出时间的条目留着(宁可见到, 也不悄悄丢), 只是排序时靠后
+            if parsed is not None and parsed.timestamp() < cutoff:
+                continue
+            kept.append(item)
+        kept.sort(key=lambda it: str(it.get("time") or ""), reverse=True)
+        if len(kept) > self._cap:
+            kept = kept[: self._cap]
+        self._items = kept
+        self._ids = {str(it["id"]) for it in kept}
+
+    # ── 落盘 ──
+    def load(self, path: Path) -> int:
+        """从磁盘恢复池子(进程重启后快讯时间线不断档)。返回当前池内条数。"""
+        try:
+            if not path.exists():
+                return 0
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("读取快讯池失败(%s): %s", path, exc)
+            return 0
+        if not isinstance(raw, list):
+            return 0
+        with self._lock:
+            for item in raw:
+                normalized = _normalize_flash(item)
+                if normalized is None or normalized["id"] in self._ids:
+                    continue
+                self._ids.add(normalized["id"])
+                self._items.append(normalized)
+            self._trim(time.time())
+            return len(self._items)
+
+    def save(self, path: Path, *, force: bool = False) -> bool:
+        """把池子写盘(默认节流 60s)。写临时文件再替换, 避免读到写了一半的 JSON。"""
+        moment = time.time()
+        with self._lock:
+            if not force and (moment - self._saved_at) < _FLASH_SAVE_MIN_INTERVAL:
+                return False
+            payload = json.dumps(self._items, ensure_ascii=False)
+            self._saved_at = moment
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            tmp.replace(path)
+            return True
+        except Exception as exc:
+            logger.warning("写入快讯池失败(%s): %s", path, exc)
+            return False
+
+
+# 进程级单例 —— NewsService 是按请求构造的, 池子必须放模块级才能共享
+flash_feed = FlashFeed()
+_FLASH_LOAD_LOCK = threading.RLock()
+_flash_loaded_path: Path | None = None
+
 class NewsService:
     """新闻与前瞻催化服务单例"""
 
@@ -39,8 +294,7 @@ class NewsService:
         self.data_dir = data_dir or Path("data")
         self._catalysts_file = self.data_dir / "user_data" / "tomorrow_catalysts.json"
         self._morning_file = self.data_dir / "user_data" / "morning_brief.json"
-        self._cache_flash: list[dict] = []
-        self._cache_flash_time: float = 0.0
+        self._flash_file = self.data_dir / "user_data" / "flash_feed.json"
         self._ensure_files()
 
     def _ensure_files(self) -> None:
@@ -354,63 +608,246 @@ class NewsService:
         self._catalysts_file.write_text(json.dumps(new_list, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
 
-    def fetch_live_flash(self, limit: int = 50) -> list[dict]:
-        """获取 7x24 实时快讯（带内存缓存 15 秒）"""
+    def _akshare_news_rows(self, ak, func_name: str, source: str, body_col: str) -> list[dict]:
+        """单个 akshare 全球快讯源的容错读取(返回统一结构)。"""
+        if ak is None:
+            return []
+        func = getattr(ak, func_name, None)
+        if func is None:
+            logger.debug("快讯合并池: akshare 无 %s", func_name)
+            return []
+        try:
+            df = func()
+        except Exception as exc:  # 单源失败不影响其余来源
+            logger.debug("快讯合并池 %s 拉取失败: %s", func_name, exc)
+            return []
+        if df is None or getattr(df, "empty", True):
+            return []
+
+        rows: list[dict] = []
+        for row in df.to_dict("records"):
+            content = _clean_text(str(row.get(body_col) or row.get("内容") or row.get("摘要") or ""))
+            title = _news_title(row.get("标题"), content)
+            if not title:
+                continue
+            # 各源时间列名不同: 东财/富途/同花顺 = 发布时间, 财联社 = 发布日+发布时间, 新浪 = 时间
+            moment = _coerce_dt(row.get("发布时间") or row.get("时间"), row.get("发布日期"))
+            if moment is None:
+                continue
+            rows.append({
+                "id": _news_id(source, title),
+                "time": moment.strftime("%Y-%m-%d %H:%M:%S"),
+                "title": title,
+                "content": content,
+                "source": source,
+                "url": str(row.get("链接") or ""),
+            })
+        return rows
+
+    def fetch_news_pool(self, limit: int = 300, within_hours: int = 48) -> list[dict]:
+        """多源财经快讯合并池(标题/正文/时间/来源/链接), 供板块归因与关联快讯检索。
+
+        源: 东财全球快讯(约 200 条, 覆盖最近一天) + 富途 + 同花顺 + 财联社 + 新浪 7x24。
+        单一源失败不阻塞其余来源; 结果按标题去重、时间倒序, 只留 within_hours 小时内的条目。
+        进程内缓存 _POOL_TTL 秒 —— 这是读取路径, 不该每个请求都打上游。
+        """
         now = time.time()
-        if self._cache_flash and (now - self._cache_flash_time < 15.0):
-            return self._cache_flash[:limit]
+        if NewsService._pool_cache and (now - NewsService._pool_cache_ts) < _POOL_TTL:
+            return NewsService._pool_cache[:limit]
+
+        try:
+            import akshare as ak
+        except Exception as exc:  # 缺依赖时退化为只用站内实时快讯
+            logger.warning("快讯合并池: akshare 不可用: %s", exc)
+            ak = None
+
+        items: list[dict] = []
+        for source, func_name, body_col in (
+            ("东方财富", "stock_info_global_em", "摘要"),
+            ("富途", "stock_info_global_futu", "内容"),
+            ("同花顺", "stock_info_global_ths", "内容"),
+            ("财联社", "stock_info_global_cls", "内容"),
+            ("新浪财经", "stock_info_global_sina", "内容"),  # 正文自带「【标题】」前缀
+        ):
+            items.extend(self._akshare_news_rows(ak, func_name, source, body_col))
+        for flash in self.fetch_live_flash(limit=30):
+            if flash.get("is_fallback"):
+                continue
+            moment = _coerce_dt(flash.get("time"))
+            title = _news_title(flash.get("title"), str(flash.get("content") or ""))
+            if moment is None or not title:
+                continue
+            items.append({
+                "id": _news_id("新浪7x24", title),
+                "time": moment.strftime("%Y-%m-%d %H:%M:%S"),
+                "title": title,
+                "content": _clean_text(str(flash.get("content") or "")),
+                "source": "新浪7x24",
+                "url": str(flash.get("url") or ""),
+            })
+
+        cutoff = datetime.now() - timedelta(hours=max(1, int(within_hours)))
+        items = [it for it in items if _coerce_dt(it["time"]) and _coerce_dt(it["time"]) >= cutoff]
+        items.sort(key=lambda it: it["time"], reverse=True)
+
+        # 同一事件常被多家源以不同口吻转发(富途与财联社的标题只差一个前缀),
+        # 只删完全相同的标题会让卡片上出现两条一模一样的快讯
+        kept_keys: list[str] = []
+        pool: list[dict] = []
+        for item in items:
+            key = _title_key(item["title"])
+            if not key or _same_story(key, kept_keys):
+                continue
+            kept_keys.append(key)
+            pool.append(item)
+
+        NewsService._pool_cache = pool
+        NewsService._pool_cache_ts = now
+        return pool[:limit]
+
+    # ── 7x24 快讯滚动池 ───────────────────────────────────────────────
+    def _ensure_flash_feed_loaded(self) -> None:
+        """首次访问时从磁盘恢复池子(每个 data_dir 只恢复一次, 不覆盖内存里已累积的)。"""
+        global _flash_loaded_path
+        path = self._flash_file
+        with _FLASH_LOAD_LOCK:
+            if _flash_loaded_path == path:
+                return
+            flash_feed.clear()
+            flash_feed.load(path)
+            _flash_loaded_path = path
+
+    def _fetch_upstream_flash(self) -> list[dict]:
+        """拉一次上游 7x24 快讯(新浪财经直播)。失败抛异常, 由调用方决定降级策略。"""
+        with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=8.0) as client:
+            r = client.get("https://zhibo.sina.com.cn/api/zhibo/feed?zhibo_id=152&limit=50")
+            r.raise_for_status()
+            data = r.json()
+        raw_list = data.get("result", {}).get("data", {}).get("feed", {}).get("list", []) or []
 
         out: list[dict] = []
+        for item in raw_list:
+            rich_text = item.get("rich_text") or ""
+            doc_url = item.get("docurl") or ""
+            create_time = item.get("create_time") or ""
+            tag = item.get("tag", [{}])[0].get("name") if item.get("tag") else "要闻"
+            title = rich_text.split("】", 1)[0].replace("【", "") if "【" in rich_text else ""
+            body = rich_text.split("】", 1)[1] if "【" in rich_text else rich_text
+            out.append({
+                "id": str(item.get("id")),
+                "time": create_time,
+                "tag": tag or "财经",
+                "title": title or _clean_text(rich_text[:30]),
+                "content": _clean_text(body or rich_text),
+                "url": doc_url,
+            })
+        return out
+
+    def refresh_flash_store(self) -> list[dict]:
+        """抓一次上游并并入滚动池, 返回本次新增条目(空列表 = 上游没新内容)。
+
+        是否抓取由调用方决定(NewsPoller 定节奏 / 读取路径的兜底 TTL),
+        读取路径不该每个请求都打上游。
+        """
+        self._ensure_flash_feed_loaded()
         try:
-            with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=8.0) as client:
-                r = client.get("https://zhibo.sina.com.cn/api/zhibo/feed?zhibo_id=152&limit=50")
-                if r.status_code == 200:
-                    data = r.json()
-                    raw_list = data.get("result", {}).get("data", {}).get("feed", {}).get("list", [])
-                    for item in raw_list:
-                        rich_text = item.get("rich_text") or ""
-                        doc_url = item.get("docurl") or ""
-                        create_time = item.get("create_time") or ""
-                        tag = item.get("tag", [{}])[0].get("name") if item.get("tag") else "要闻"
-                        title = rich_text.split("】", 1)[0].replace("【", "") if "【" in rich_text else ""
-                        body = rich_text.split("】", 1)[1] if "【" in rich_text else rich_text
+            rows = self._fetch_upstream_flash()
+        except Exception as exc:  # 上游挂了不能让请求路径 500
+            logger.warning("拉取 7x24 快讯失败: %s", exc)
+            flash_feed.note_failure(str(exc))
+            return []
+        return flash_feed.merge(rows)
 
-                        out.append({
-                            "id": str(item.get("id")),
-                            "time": create_time,
-                            "tag": tag or "财经",
-                            "title": title or _clean_text(rich_text[:30]),
-                            "content": _clean_text(body or rich_text),
-                            "url": doc_url,
-                        })
-        except Exception as e:
-            logger.warning("拉取 7x24 快讯失败: %s", e)
+    def refresh_flash_from_pool(self, limit: int = 120, within_hours: int = 12) -> list[dict]:
+        """降级抓取: 用多源合并池(东财/富途/同花顺/财联社/新浪)补进滚动池。
 
-        # 兜底补充
-        if not out:
-            out = [
-                {
-                    "id": "f_1",
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "tag": "半导体",
-                    "title": "晶圆代工产能持续紧张，功率与模拟芯片排期延长",
-                    "content": "业内人士表示，随着端侧AI及新能源汽车应用深入，8英寸与12英寸晶圆代工订单饱满。",
-                },
-                {
-                    "id": "f_2",
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "tag": "固态电池",
-                    "title": "全固态电池产线建设进入关键节点，关键材料实现首批装车验证",
-                    "content": "多家具备硫化物及聚合物路线研发能力的企业宣布中试线投产，能量密度突破450Wh/kg。",
-                }
-            ]
+        主源(新浪 7x24 直播)被限流或改版时, 时间线不该整段停住 —— 已有的多源能力
+        在这里接到池子上。返回本次新增条目(空 = 池里已经有这些)。
+        """
+        self._ensure_flash_feed_loaded()
+        rows = self.fetch_news_pool(limit=limit, within_hours=within_hours)
+        if not rows:
+            return []
+        now = datetime.now()
+        merged: list[dict] = []
+        for row in rows:
+            moment = _coerce_dt(row.get("time"))
+            # 各源时间列口径不一(如富途的发布时间随服务器本地时区换算, 非北京时区的
+            # 机器会整体偏到未来), 而快讯不可能来自未来: 越界的一律按「刚刚」入池,
+            # 保住时间线排序与「今天/昨天」分组
+            if moment is None or moment > now:
+                moment = now
+            merged.append({
+                "id": row.get("id"),
+                "time": moment.strftime("%Y-%m-%d %H:%M:%S"),
+                # 合并池的 source 就是池子里的 tag —— 降级条目在界面上要能看出出处
+                "tag": row.get("source") or "快讯",
+                "title": row.get("title"),
+                "content": row.get("content"),
+                "url": row.get("url"),
+            })
+        return flash_feed.merge(merged)
 
-        self._cache_flash = out
-        self._cache_flash_time = now
-        return out[:limit]
+    def save_flash_store(self, *, force: bool = False) -> bool:
+        """把滚动池落盘(默认节流), 让进程重启后快讯时间线不断档。"""
+        return flash_feed.save(self._flash_file, force=force)
+
+    @staticmethod
+    def flash_meta() -> dict:
+        """快讯新鲜度元信息 —— 前端据此显示「实时更新 · 刚刚」而不是盲猜。"""
+        return {
+            "updated_at": _iso(flash_feed.updated_at),
+            "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def fetch_live_flash(self, limit: int = 50) -> list[dict]:
+        """读取 7x24 实时快讯。
+
+        池子(FlashFeed)由 NewsPoller 持续写入; 这里只做「池子还没热 / 太久没更新」
+        时兜底同步补一次, 保证没有 poller 的场景(测试 / CLI)也能拿到数据。
+        """
+        self._ensure_flash_feed_loaded()
+        now = time.time()
+        if flash_feed.attempt_at <= 0 or (now - flash_feed.attempt_at) > _FLASH_REFRESH_TTL:
+            self.refresh_flash_store()
+
+        items = flash_feed.items(limit)
+        if items:
+            return items
+
+        # 兜底示例文案。is_fallback 标记让前端能把这批跟真实快讯区分开展示,
+        # 不把演示内容当资讯(也不进池子)。
+        return [
+            {
+                "id": "f_1",
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "tag": "半导体",
+                "title": "晶圆代工产能持续紧张，功率与模拟芯片排期延长",
+                "content": "业内人士表示，随着端侧AI及新能源汽车应用深入，8英寸与12英寸晶圆代工订单饱满。",
+                "is_fallback": True,
+            },
+            {
+                "id": "f_2",
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "tag": "固态电池",
+                "title": "全固态电池产线建设进入关键节点，关键材料实现首批装车验证",
+                "content": "多家具备硫化物及聚合物路线研发能力的企业宣布中试线投产，能量密度突破450Wh/kg。",
+                "is_fallback": True,
+            },
+        ][:limit]
+
+    _quotes_map_cache: dict[str, dict] = {}
+    _quotes_map_cache_ts: float = 0.0
+    # 多源快讯合并池缓存(进程级: 归因是读取路径, 多请求共享同一份池子)
+    _pool_cache: list[dict] = []
+    _pool_cache_ts: float = 0.0
 
     def _get_realtime_quotes_map(self) -> dict[str, dict]:
-        """从智兔数据源获取最新全市场实时行情映射表 {symbol: quote}"""
+        """从智兔数据源获取最新全市场实时行情映射表 {symbol: quote}（带 30 秒内存缓存）"""
+        now = time.time()
+        if NewsService._quotes_map_cache and (now - NewsService._quotes_map_cache_ts < 30.0):
+            return NewsService._quotes_map_cache
+
         quotes_map: dict[str, dict] = {}
         try:
             from app.data_providers import custom as custom_sources
@@ -421,6 +858,9 @@ class NewsService:
                     sym = r.get("symbol")
                     if sym:
                         quotes_map[sym] = r
+                if quotes_map:
+                    NewsService._quotes_map_cache = quotes_map
+                    NewsService._quotes_map_cache_ts = now
         except Exception as e:
             logger.debug("获取智兔实时行情映射失败: %s", e)
-        return quotes_map
+        return quotes_map or NewsService._quotes_map_cache

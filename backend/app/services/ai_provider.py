@@ -211,7 +211,7 @@ async def stream_ai_text(
     messages: Sequence[Message],
     *,
     temperature: float | None = 0.5,
-    max_tokens: int = 4000,
+    max_tokens: int = 12000,
     timeout: float = 180.0,
 ) -> AsyncIterator[str]:
     """Yield text deltas from the configured provider.
@@ -288,9 +288,15 @@ async def _stream_openai(
 
     async def _iter(stream):
         async for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
             if delta and delta.content:
                 yield delta.content
+            if choice.finish_reason == "length":
+                logger.warning("OpenAI stream truncated by max_tokens limit (finish_reason=length)")
+                yield "\n\n> ⚠️ *[注：内容因达到模型单次输出上限(max_tokens)被截断]*"
 
     try:
         stream = await client.chat.completions.create(

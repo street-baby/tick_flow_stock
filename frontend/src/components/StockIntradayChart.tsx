@@ -28,6 +28,9 @@ export function StockIntradayChart({
   const qc = useQueryClient()
   const [minuteDismissed, setMinuteDismissed] = useState(false)
 
+  // crypto (USDT/USDC 交易对): 分钟K走交易所实时读取, 无"落库获取"语义
+  const isCrypto = /USDT$|USDC$/i.test(symbol) || symbol.includes(':')
+
   const minute = useQuery({
     queryKey: QK.klineMinute(symbol, date ?? ''),
     queryFn: () => api.klineMinute(symbol, date ?? undefined),
@@ -45,11 +48,12 @@ export function StockIntradayChart({
   })
 
   const minuteRows: MinuteKlineRow[] = useMemo(() => minute.data?.rows ?? [], [minute.data?.rows])
-  // source=none 表示本地无数据且 TickFlow 也拉不到 (停牌/复牌延迟/非交易日)
+  // source=none 表示本地无数据且数据源也拉不到 (停牌/复牌延迟/非交易日)
   // 此时不弹"是否获取"询问窗, 只做静态提示, 避免误导用户去拉明知拉不到的数据
   const sourceIsNone = minute.data?.source === 'none'
   // 指数分钟K无本地存储且不支持落库获取 (后端 sync_minute_single 显式拒绝), 不显示获取按钮
   const isIndex = minute.data?.asset_type === 'index'
+  const isCryptoAsset = minute.data?.asset_type === 'crypto' || isCrypto
 
   useEffect(() => {
     setMinuteDismissed(false)
@@ -68,9 +72,12 @@ export function StockIntradayChart({
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>正在获取分钟K数据…</span>
             </div>
-          ) : isIndex ? (
+          ) : isIndex || isCryptoAsset ? (
             // 指数: 分钟K仅支持实时读取, 无落库获取入口
-            <div className="flex items-center justify-center h-full text-xs text-muted">指数暂无分钟数据</div>
+            // crypto: 分钟K为交易所实时读取 (24/7), 同样无落库获取入口
+            <div className="flex items-center justify-center h-full text-xs text-muted">
+              {isCryptoAsset ? '该交易对暂无分钟数据（实时源未返回）' : '指数暂无分钟数据'}
+            </div>
           ) : sourceIsNone ? (
             // 数据源确认无此日分钟数据 (停牌/复牌延迟等): 静态提示 + 保留重试
             <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -121,6 +128,7 @@ export function StockIntradayChart({
           date={date}
           priceLimit={minute.data?.price_limit ?? undefined}
           onPriceHover={onPriceHover}
+          mode={isCryptoAsset ? 'crypto' : 'cn'}
         />
       )}
     </div>

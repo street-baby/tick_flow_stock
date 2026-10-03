@@ -36,11 +36,13 @@ _OCR_LIMITER = anyio.CapacityLimiter(2)
 class AddRequest(BaseModel):
     symbol: str
     note: str = ""
+    group: str = "默认"
 
 
 class BatchAddRequest(BaseModel):
     symbols: list[str]
     note: str = ""
+    group: str = "默认"
 
 
 def _with_names(rows: list[dict], request: Request) -> list[dict]:
@@ -69,25 +71,39 @@ def _with_names(rows: list[dict], request: Request) -> list[dict]:
 
 
 @router.get("")
-def list_all(request: Request):
-    return {"symbols": _with_names(watchlist.list_symbols(), request)}
+def list_all(request: Request, group: str | None = Query(None)):
+    return {"symbols": _with_names(watchlist.list_symbols(group=group), request)}
+
+
+@router.get("/groups")
+def list_groups():
+    return {"groups": watchlist.list_groups()}
+
+
+@router.post("/populate-sectors")
+def populate_sectors(request: Request):
+    from app.services.sector_watchlist import populate_sector_watchlist
+    data_dir = request.app.state.repo.store.data_dir
+    res = populate_sector_watchlist(data_dir)
+    return res
 
 
 @router.post("")
 def add_one(req: AddRequest, request: Request):
-    rows = watchlist.add(req.symbol, req.note)
+    rows = watchlist.add(req.symbol, req.note, req.group)
     return {"symbols": _with_names(rows, request)}
 
 
 @router.post("/batch")
 def add_batch(req: BatchAddRequest, request: Request):
-    existing = {r["symbol"] for r in watchlist.list_symbols()}
+    existing = {(r["symbol"], r.get("group", "默认")) for r in watchlist.list_symbols()}
     added = 0
+    grp = req.group or "默认"
     for sym in req.symbols:
-        if sym not in existing:
+        if (sym, grp) not in existing:
             added += 1
-            existing.add(sym)
-        watchlist.add(sym, req.note)
+            existing.add((sym, grp))
+        watchlist.add(sym, req.note, grp)
     return {"symbols": _with_names(watchlist.list_symbols(), request), "added": added}
 
 
@@ -137,21 +153,21 @@ async def import_from_image(request: Request, file: UploadFile = File(...)):
 
 
 @router.post("/{symbol}/top")
-def move_one_to_top(symbol: str, request: Request):
-    rows = watchlist.move_to_top(symbol)
+def move_one_to_top(symbol: str, request: Request, group: str | None = Query(None)):
+    rows = watchlist.move_to_top(symbol, group=group)
     return {"symbols": _with_names(rows, request)}
 
 
 @router.delete("/{symbol}")
-def remove_one(symbol: str, request: Request):
-    rows = watchlist.remove(symbol)
+def remove_one(symbol: str, request: Request, group: str | None = Query(None)):
+    rows = watchlist.remove(symbol, group=group)
     return {"symbols": _with_names(rows, request)}
 
 
 @router.delete("")
-def clear_all():
-    """清空自选列表。"""
-    count = watchlist.clear()
+def clear_all(group: str | None = Query(None)):
+    """清空自选列表（支持清空全部分组或指定分组）。"""
+    count = watchlist.clear(group=group)
     return {"removed": count}
 
 
@@ -183,6 +199,7 @@ _WATCHLIST_COLS = [
 def watchlist_enriched(
     request: Request,
     ext_columns: str | None = Query(None, description="逗号分隔的 ext 列: config_id.field_name"),
+    group: str | None = Query(None, description="按自选分组过滤"),
 ):
     """自选股 enriched 数据 — 直接从 enriched 最新日读取, 无即时计算。
 
@@ -192,7 +209,29 @@ def watchlist_enriched(
     t0 = time.perf_counter()
 
     repo = request.app.state.repo
-    symbols = [r["symbol"] for r in watchlist.list_symbols()]
+    try:
+        raw_entries = watchlist.list_symbols(group=group) if group is not None else watchlist.list_symbols()
+    except TypeError:
+        raw_entries = watchlist.list_symbols()
+    if not raw_entries:
+        return {"rows": [], "as_of": None, "elapsed_ms": 0}
+
+    # 按 symbol 保留 group 与 note
+    group_map: dict[str, str] = {}
+    note_map: dict[str, str] = {}
+    symbols: list[str] = []
+    seen = set()
+    for r in raw_entries:
+        sym = r.get("symbol")
+        if not sym:
+            continue
+        if sym not in group_map:
+            group_map[sym] = r.get("group") or "默认"
+            note_map[sym] = r.get("note") or ""
+        if sym not in seen:
+            seen.add(sym)
+            symbols.append(sym)
+
     if not symbols:
         return {"rows": [], "as_of": None, "elapsed_ms": 0}
 
@@ -359,6 +398,12 @@ def watchlist_enriched(
                     r["market"] = q.get("market")
         except Exception as e:
             logger.warning("自选股美股/加密货币报价刷新失败: %s", e)
+
+    for r in rows:
+        sym = r.get("symbol")
+        if sym:
+            r["group"] = group_map.get(sym, "默认")
+            r["note"] = note_map.get(sym, "")
 
     if not as_of and tv_symbols:
         as_of = date.today()

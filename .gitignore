@@ -114,3 +114,6 @@ reports/cursor_tickflow_pro_rate_limit_p0.bundle
 *.app/
 output/
 backend/scratch_backtest_data.json
+.freebuff/
+scratch/
+a-share-quant-selector/

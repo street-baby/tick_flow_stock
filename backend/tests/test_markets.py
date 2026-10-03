@@ -13,6 +13,7 @@ from app.markets import (
     MARKET_CN,
     MARKET_HK,
     MARKET_US,
+    MARKET_CRYPTO,
     exchanges_for,
     get_market,
     has_limit,
@@ -414,7 +415,7 @@ def test_unknown_market_raises_value_error(fn):
 
 
 def test_registry_self_consistency():
-    assert ALL_MARKETS == [MARKET_CN, MARKET_HK, MARKET_US]
+    assert ALL_MARKETS == [MARKET_CN, MARKET_HK, MARKET_US, MARKET_CRYPTO]
     for market in ALL_MARKETS:
         meta = get_market(market)
         assert meta.market == market

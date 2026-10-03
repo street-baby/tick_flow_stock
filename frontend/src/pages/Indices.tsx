@@ -78,14 +78,30 @@ const MARKET_PINNED: Record<'hk' | 'us', { symbol: string; name: string }[]> = {
   ],
 }
 
+// crypto 置顶"指数"（主流币; 与后端 _CRYPTO_PINNED 对齐, 仅作 list 接口异常时的兕底渲染）
+const CRYPTO_PINNED = [
+  { symbol: 'BTCUSDT', name: '比特币' },
+  { symbol: 'ETHUSDT', name: '以太坊' },
+  { symbol: 'SOLUSDT', name: 'Solana' },
+  { symbol: 'BNBUSDT', name: 'BNB' },
+  { symbol: 'DOGEUSDT', name: '狗狗币' },
+]
+
+function pinnedFor(market: string): { symbol: string; name: string }[] {
+  if (market === 'hk' || market === 'us') return MARKET_PINNED[market]
+  if (market === 'crypto') return CRYPTO_PINNED
+  return []
+}
+
 function pinnedRank(item: IndexInstrument) {
   return PINNED_INDEXES.findIndex(p => item.symbol === p.symbol || item.name === p.name)
 }
 
 export function Indices() {
-  // 多市场扩展：港美股复用 A 股完整 UI（搜索/分时/同步除外）
+  // 多市场扩展：港美股/crypto 复用 A 股完整 UI（搜索/分时/同步除外）
   const { market } = useMarket()
   const isCn = market === 'cn'
+  const isCrypto = market === 'crypto'
 
   const qc = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -97,11 +113,16 @@ export function Indices() {
   const [linkedPrice, setLinkedPrice] = useState<number | null>(null)
 
   // 分时数据支持: A股支持分时K线
-  const hasMinuteCap = isCn
+  // A股指数分时需 Pro 套餐; crypto 无此限制 (交易所实时 1m K 公开数据)
+  const hasMinuteCap = isCn || isCrypto
 
   const list = useQuery({
     queryKey: [...QK.indexList, market] as const,
-    queryFn: () => isCn ? api.indexList() : api.indicesMarketList(market as 'hk' | 'us'),
+    queryFn: () => isCn
+      ? api.indexList()
+      : isCrypto
+        ? api.indicesCryptoList()
+        : api.indicesMarketList(market as 'hk' | 'us'),
   })
 
   const search = useQuery({
@@ -115,14 +136,14 @@ export function Indices() {
     : (list.data?.results ?? [])
   const topRows = useMemo(() => {
     const all = list.data?.results ?? []
-    const pinned = isCn ? PINNED_INDEXES : MARKET_PINNED[market as 'hk' | 'us']
+    const pinned = isCn ? PINNED_INDEXES : pinnedFor(market)
     return pinned.map(p => (
-      all.find(item => item.symbol === p.symbol || item.name === p.name) ?? { symbol: p.symbol, name: p.name, asset_type: 'index' as const }
+      all.find(item => item.symbol === p.symbol || item.name === p.name) ?? { symbol: p.symbol, name: p.name, asset_type: (isCrypto ? 'crypto' : 'index') as 'crypto' | 'index' }
     ))
-  }, [list.data?.results, market, isCn])
+  }, [list.data?.results, market, isCn, isCrypto])
   const listRows = useMemo(() => {
     if (isCn) return rows.filter(item => pinnedRank(item) < 0)
-    const pinnedSymbols = new Set(MARKET_PINNED[market as 'hk' | 'us'].map(p => p.symbol))
+    const pinnedSymbols = new Set(pinnedFor(market).map(p => p.symbol))
     return rows.filter(item => !pinnedSymbols.has(item.symbol) && !pinnedSymbols.has(item.name ?? ''))
   }, [rows, market, isCn])
 
@@ -139,7 +160,11 @@ export function Indices() {
 
   const quotes = useQuery({
     queryKey: [...QK.indexQuotes, market] as const,
-    queryFn: () => isCn ? api.indexQuotes() : api.indicesMarketQuotes(market as 'hk' | 'us'),
+    queryFn: () => isCn
+      ? api.indexQuotes()
+      : isCrypto
+        ? api.indicesCryptoQuotes()
+        : api.indicesMarketQuotes(market as 'hk' | 'us'),
     placeholderData: (prev) => prev,
     refetchInterval: 3000,
   })
@@ -148,20 +173,24 @@ export function Indices() {
     queryKey: QK.indexDaily(selectedSymbol, range.start, range.end),
     queryFn: () => (isCn
       ? api.indexDaily(selectedSymbol, 180, range)
-      : api.indicesMarketDaily(market as 'hk' | 'us', selectedSymbol, 180)) as any,
+      : isCrypto
+        ? api.indicesCryptoDaily(selectedSymbol, 180)
+        : api.indicesMarketDaily(market as 'hk' | 'us', selectedSymbol, 180)) as any,
     enabled: !!selectedSymbol,
     placeholderData: (prev) => prev,
-    refetchInterval: 10000,
+    refetchInterval: isCrypto ? 15000 : 10000,
   })
 
   const minute = useQuery({
     queryKey: QK.indexMinute(selectedSymbol, selectedDate ?? ''),
     queryFn: () => (isCn
       ? api.indexMinute(selectedSymbol, selectedDate ?? undefined)
-      : api.indicesMarketMinute(market as 'hk' | 'us', selectedSymbol)) as any,
+      : isCrypto
+        ? api.indicesCryptoMinute(selectedSymbol)
+        : api.indicesMarketMinute(market as 'hk' | 'us', selectedSymbol)) as any,
     enabled: !!selectedSymbol && !!selectedDate && hasMinuteCap,
     placeholderData: (prev) => prev,
-    refetchInterval: 3000,
+    refetchInterval: isCrypto ? 15000 : 3000,
   })
 
   const syncInstruments = useMutation({
@@ -239,9 +268,10 @@ export function Indices() {
         <div>
           <h1 className="text-lg font-semibold text-foreground">指数</h1>
           <p className="mt-1 text-xs text-muted">
-            指数使用独立 kline_index_* parquet，不进入股票选股和策略链路。
+            {isCrypto ? '加密主流币实时行情（Bybit），不进入股票选股和策略链路。' : '指数使用独立 kline_index_* parquet，不进入股票选股和策略链路。'}
           </p>
         </div>
+        {!isCrypto && (
         <div className="flex items-center gap-2">
           {isCn && (
             <button
@@ -262,6 +292,7 @@ export function Indices() {
             同步指数日K
           </button>
         </div>
+        )}
       </div>
 
       <div className="grid grid-cols-[15rem_1fr] gap-4">
@@ -284,7 +315,7 @@ export function Indices() {
             {(list.isLoading || search.isLoading) && <div className="py-4 text-center text-xs text-muted">加载中…</div>}
             {!list.isLoading && listRows.length === 0 && (
               <div className="rounded-btn bg-elevated p-3 text-xs text-muted">
-                {keyword.trim() ? '无匹配指数。' : '暂无更多指数，先点击“同步指数列表”。'}
+                {keyword.trim() ? '无匹配指数。' : isCrypto ? '主流币即全部清单。' : '暂无更多指数，先点击“同步指数列表”。'}
               </div>
             )}
             {listRows.map(renderIndexItem)}
@@ -375,7 +406,10 @@ export function Indices() {
                         prevClose={prevClose}
                         date={selectedDate ?? undefined}
                         showLimitLines={false}
-                        showAvgLine={false}
+                        showAvgLine={!isCrypto}
+                        mode={isCrypto ? 'crypto' : 'cn'}
+                        // 指数成交量是成分股股数之和, 额/量不是指数点位, 均价必须用成交额加权口径
+                        avgMode={isCrypto ? 'vwap' : 'amount-weighted'}
                         onPriceHover={setLinkedPrice}
                       />
                     )}

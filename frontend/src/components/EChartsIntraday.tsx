@@ -5,6 +5,15 @@ import type { MinuteKlineRow, PriceLimitInfo } from '@/lib/api'
 import { useChartTheme, type ChartTheme } from '@/lib/theme'
 
 type YMode = 'adaptive' | 'limit'
+/** cn = A股固定 9:30~15:00 242 槽时间轴; crypto = 按数据自身 UTC 时间滚动轴 (24/7) */
+type AxisMode = 'cn' | 'crypto'
+/**
+ * 分时均价口径。
+ * - vwap: 累计成交额 / 累计成交量, 适用于「成交量与价格同量纲」的标的 (个股/ETF/crypto)。
+ * - amount-weighted: 成交额加权均价 Σ(价×额)/Σ额, 用于指数 —— 指数成交量是成分股股数之和,
+ *   额/量 得到的是全市场每股均价 (~17 元), 与指数点位 (~3900) 不同量纲。
+ */
+type AvgMode = 'vwap' | 'amount-weighted'
 
 // 序列颜色 (双主题通用); 画布轴/网格/十字线等主题相关色走 ChartTheme
 const THEME = {
@@ -24,6 +33,10 @@ interface Props {
   onPriceHover?: (price: number | null) => void
   showLimitLines?: boolean
   showAvgLine?: boolean
+  /** crypto: UTC 滚动时间轴 + 无涨跌停语义 + 小额价格自适应精度 (默认 cn) */
+  mode?: AxisMode
+  /** 均价口径, 默认 vwap; 指数分时必须传 amount-weighted (见 AvgMode) */
+  avgMode?: AvgMode
 }
 
 function fmtTime(dt: string): string {
@@ -35,17 +48,57 @@ function fmtTime(dt: string): string {
   return `${String(h).padStart(2, '0')}:${match[2]}`
 }
 
-function computeAvgPrice(data: MinuteKlineRow[]): number[] {
-  // 分时均线 = 累计成交额 / 累计成交量(手→股)
+function computeAvgPrice(data: MinuteKlineRow[], volScale = 100, mode: AvgMode = 'vwap'): number[] {
+  // vwap: 累计成交额 / 累计成交量。cn 个股: volume 单位是手 → ×100 转股;
+  //       crypto: volume 是币量, amount 是 USDT → volScale=1。
+  // amount-weighted: 指数专用, 见 AvgMode 注释。
   const result: number[] = []
   let sumAmt = 0
   let sumVol = 0
+  let sumWeighted = 0
   for (const d of data) {
     sumAmt += d.amount
-    sumVol += d.volume * 100
-    result.push(sumVol > 0 ? sumAmt / sumVol : d.close)
+    sumVol += d.volume * volScale
+    sumWeighted += d.close * d.amount
+    if (mode === 'amount-weighted' && sumAmt > 0) {
+      result.push(sumWeighted / sumAmt)
+    } else {
+      result.push(sumVol > 0 ? sumAmt / sumVol : d.close)
+    }
   }
   return result
+}
+
+/**
+ * 均价是否与价格同量纲: VWAP 按定义落在当日 [最低价, 最高价] 内, 越界即说明该数据源的
+ * amount/volume 口径与价格不一致 (如指数)。此时不画均价线, 也不能让它参与 Y 轴范围计算,
+ * 否则一根 ~17 元的均价线会把 ±0.5% 的指数分时图撑到 ±100%, 价格线被压成横线。
+ */
+function isAvgInPriceRange(data: MinuteKlineRow[], avgPrices: number[]): boolean {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const d of data) {
+    for (const v of [d.low, d.high, d.close]) {
+      if (!isValidPrice(v)) continue
+      if (v < lo) lo = v
+      if (v > hi) hi = v
+    }
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false
+  const tolerance = (hi - lo) * 0.05
+  const inside = avgPrices.filter(v => isValidPrice(v) && v >= lo - tolerance && v <= hi + tolerance).length
+  return inside * 2 >= avgPrices.length
+}
+
+/** 价格自适应精度: A股 2 位小数不变; crypto 小额币 (0.0012) 不至于显示成 0.00 */
+function fmtPx(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return '—'
+  if (v === 0) return '0.00'
+  const abs = Math.abs(v)
+  if (abs < 0.0001) return v.toFixed(6)
+  if (abs < 0.01) return v.toFixed(5)
+  if (abs < 1) return v.toFixed(4)
+  return v.toFixed(2)
 }
 
 function fmtAmt(v: number): string {
@@ -103,14 +156,16 @@ function getLimitPrices(prevClose: number, priceLimit?: PriceLimitInfo): {
   return { limitUp, limitDown, upPct, downPct }
 }
 
-function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgPrices: number[], lineColor: string, areaColor: string, yMode: YMode, ct: ChartTheme, priceLimit?: PriceLimitInfo, showLimitLines = true, showAvgLine = true): EChartsOption {
+function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgPrices: number[], lineColor: string, areaColor: string, yMode: YMode, ct: ChartTheme, priceLimit?: PriceLimitInfo, showLimitLines = true, showAvgLine = true, mode: AxisMode = 'cn'): EChartsOption {
   // 将数据映射到全天时间轴上的正确位置
-  const timeIndexMap = new Map(FULL_DAY_TIMES.map((t, i) => [t, i]))
-  const closes = new Array(FULL_DAY_TIMES.length).fill(null) as (number | null)[]
-  const highs = new Array(FULL_DAY_TIMES.length).fill(null) as (number | null)[]
-  const lows = new Array(FULL_DAY_TIMES.length).fill(null) as (number | null)[]
-  const avgData = new Array(FULL_DAY_TIMES.length).fill(null) as (number | null)[]
-  const volumes = new Array(FULL_DAY_TIMES.length).fill(null) as (any | null)[]
+  // crypto: 类目轴直接用数据自身时间标签 (UTC, 每分钟一根), 不做 A 股 242 槽对齐
+  const axisTimes = mode === 'crypto' ? data.map(d => fmtTime(d.datetime)) : FULL_DAY_TIMES
+  const timeIndexMap = new Map(axisTimes.map((t, i) => [t, i]))
+  const closes = new Array(axisTimes.length).fill(null) as (number | null)[]
+  const highs = new Array(axisTimes.length).fill(null) as (number | null)[]
+  const lows = new Array(axisTimes.length).fill(null) as (number | null)[]
+  const avgData = new Array(axisTimes.length).fill(null) as (number | null)[]
+  const volumes = new Array(axisTimes.length).fill(null) as (any | null)[]
 
   const volNeutral = 'rgba(161,161,170,0.5)'
   for (let i = 0; i < data.length; i++) {
@@ -164,7 +219,7 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
       }
     }
 
-    if (showLimitLines && yMode === 'limit') {
+    if (showLimitLines && yMode === 'limit' && mode !== 'crypto') {
       const { limitUp, limitDown } = getLimitPrices(prevClose, priceLimit)
       const limitDiffUp = limitUp - prevClose
       const limitDiffDown = prevClose - limitDown
@@ -189,17 +244,17 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
         },
       )
     } else {
-      // 自适应模式: Y 轴按实际涨跌幅对称, 但不超出实际涨跌停范围
-      if (showLimitLines) {
+      // 自适应模式: Y 轴按实际涨跌幅对称。crypto 无涨跌停, 直接自适应 ±10% 余量。
+      if (showLimitLines && mode !== 'crypto') {
         const { limitUp, limitDown } = getLimitPrices(prevClose, priceLimit)
         const limitDiff = Math.max(limitUp - prevClose, prevClose - limitDown)
         maxDiff = Math.min(maxDiff, limitDiff)
       }
-      if (!showLimitLines && maxDiff > 0) {
+      if ((!showLimitLines || mode === 'crypto') && maxDiff > 0) {
         maxDiff *= 1.1
       }
       // 至少保证一个可视范围 (防止数据平时 maxDiff=0)。指数不使用涨跌停范围，最小范围要更紧，否则低波动指数会被压成横线。
-      const minDiff = showLimitLines ? prevClose * 0.01 : prevClose * 0.001
+      const minDiff = showLimitLines && mode !== 'crypto' ? prevClose * 0.01 : prevClose * 0.001
       if (maxDiff < minDiff) maxDiff = minDiff
       yMin = prevClose - maxDiff
       yMax = prevClose + maxDiff
@@ -208,13 +263,16 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
 
   // x 轴标签: 9:30, 10:30, 11:30/13:00, 14:00, 15:00
   // 11:30(idx 120) 和 13:00(idx 121) 相邻会重叠, 合并为一个标签
-  const xAxisLabelMap: Record<number, string> = {
-    0: '9:30',
-    60: '10:30',
-    120: '11:30/13:00',
-    181: '14:00',
-    241: '15:00',
-  }
+  // crypto: 类目轴 label 全部隐藏, 由 axisPointer 十字线按槽位显示时间 (轴是数据自适应的)
+  const xAxisLabelMap: Record<number, string> = mode === 'crypto'
+    ? {}
+    : {
+        0: '9:30',
+        60: '10:30',
+        120: '11:30/13:00',
+        181: '14:00',
+        241: '15:00',
+      }
   const xAxisLabelFormatter = (_value: string, idx: number) => {
     return xAxisLabelMap[idx] ?? ''
   }
@@ -254,7 +312,7 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
     xAxis: [
       {
         type: 'category',
-        data: FULL_DAY_TIMES,
+        data: axisTimes,
         boundaryGap: false,
         axisPointer: {
           show: true,
@@ -290,7 +348,7 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
       {
         type: 'category',
         gridIndex: 1,
-        data: FULL_DAY_TIMES,
+        data: axisTimes,
         boundaryGap: false,
         axisLine: { show: false },
         axisLabel: { show: false },
@@ -312,7 +370,7 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
           label: {
             formatter: (params: any) => {
               const v = params.value
-              return typeof v === 'number' ? v.toFixed(2) : ''
+              return typeof v === 'number' ? fmtPx(v) : ''
             },
           },
         },
@@ -320,7 +378,7 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
           color: ct.text,
           fontSize: 10,
           fontFamily: 'JetBrains Mono, monospace',
-          formatter: (v: number) => v.toFixed(2),
+          formatter: (v: number) => fmtPx(v),
         },
       },
       {
@@ -401,7 +459,7 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
   }
 }
 
-export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimit, onPriceHover, showLimitLines = true, showAvgLine = true }: Props) {
+export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimit, onPriceHover, showLimitLines = true, showAvgLine = true, mode = 'cn', avgMode = 'vwap' }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ECharts | null>(null)
   const roRef = useRef<ResizeObserver | null>(null)
@@ -416,7 +474,10 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
   const [infoIdx, setInfoIdx] = useState(data.length - 1)
   const [yMode, setYMode] = useState<YMode>('adaptive')
   const ct = useChartTheme()
-  const avgPrices = useMemo(() => computeAvgPrice(data), [data])
+  // cn: volume 单位是手(×100 转股); crypto: volume 是币量, amount 已是 USDT 计价额
+  const avgPrices = useMemo(() => computeAvgPrice(data, mode === 'crypto' ? 1 : 100, avgMode), [data, mode, avgMode])
+  // 均价与价格不同量纲时不画均价线 (也不参与 Y 轴范围), 见 isAvgInPriceRange
+  const showAvg = showAvgLine && isAvgInPriceRange(data, avgPrices)
 
   // 分时线颜色：基于最新价 vs 昨收
   const lastClose = data.length > 0 ? data[data.length - 1].close : null
@@ -478,8 +539,9 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
     }
 
     if (data.length > 0) {
-      // 构建全日索引 → 数据索引 的映射
-      const timeIndexMap = new Map(FULL_DAY_TIMES.map((t, i) => [t, i]))
+      // 构建轴索引 → 数据索引 的映射 (crypto 轴即数据序号, 恒等映射)
+      const axisTimes = mode === 'crypto' ? data.map(d => fmtTime(d.datetime)) : FULL_DAY_TIMES
+      const timeIndexMap = new Map(axisTimes.map((t, i) => [t, i]))
       const mapping = new Map<number, number>()
       for (let i = 0; i < data.length; i++) {
         const timeKey = fmtTime(data[i].datetime)
@@ -490,11 +552,11 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
       }
       fullDayToDataIdx.current = mapping
 
-      chart.setOption(buildOption(data, prevClose, avgPrices, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine), true)
+      chart.setOption(buildOption(data, prevClose, avgPrices, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines && mode !== 'crypto', showAvg, mode), true)
     } else {
       chart.clear()
     }
-  }, [data, prevClose, height, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine])
+  }, [data, prevClose, height, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvg, mode])
 
   useEffect(() => {
     return () => {
@@ -518,8 +580,8 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
 
   return (
     <div className="w-full">
-      {/* 按钮行: 切换式按钮组, 居右 */}
-      {showLimitLines && <div className="flex items-center justify-end px-1 pb-0.5">
+      {/* 按钮行: 切换式按钮组, 居右 (crypto 无涨跌停语义, 隐藏切换) */}
+      {showLimitLines && mode !== 'crypto' && <div className="flex items-center justify-end px-1 pb-0.5">
         <div className="inline-flex items-center rounded bg-elevated overflow-hidden">
           <button
             onClick={() => setYMode('adaptive')}
@@ -552,13 +614,13 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
             <>
               {date && <span className="text-muted">{date}</span>}
               <span className="text-muted">开</span>
-              <span style={{ color: priceClr }}>{d.open.toFixed(2)}</span>
+              <span style={{ color: priceClr }}>{fmtPx(d.open)}</span>
               <span className="text-muted">高</span>
-              <span style={{ color: priceClr }}>{d.high.toFixed(2)}</span>
+              <span style={{ color: priceClr }}>{fmtPx(d.high)}</span>
               <span className="text-muted">低</span>
-              <span style={{ color: priceClr }}>{d.low.toFixed(2)}</span>
+              <span style={{ color: priceClr }}>{fmtPx(d.low)}</span>
               <span className="text-muted">收</span>
-              <span style={{ color: priceClr }} className="font-semibold">{d.close.toFixed(2)}</span>
+              <span style={{ color: priceClr }} className="font-semibold">{fmtPx(d.close)}</span>
             </>
           )}
         </div>
@@ -568,12 +630,16 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
             <>
               <span className="flex items-center gap-x-1">
                 <span style={{ display: 'inline-block', width: 14, height: 2, background: priceClr }} />
-                <span style={{ color: priceClr }}>{d.close.toFixed(2)}</span>
+                <span style={{ color: priceClr }}>{fmtPx(d.close)}</span>
               </span>
-              {showAvgLine && <span className="flex items-center gap-x-1">
-                <span style={{ display: 'inline-block', width: 14, height: 2, background: THEME.avgLine }} />
-                <span style={{ color: THEME.avgLine }}>{avg?.toFixed(2)}</span>
-              </span>}
+              {showAvgLine && (showAvg ? (
+                <span className="flex items-center gap-x-1">
+                  <span style={{ display: 'inline-block', width: 14, height: 2, background: THEME.avgLine }} />
+                  <span style={{ color: THEME.avgLine }}>{fmtPx(avg)}</span>
+                </span>
+              ) : (
+                <span className="text-muted">均价 —</span>
+              ))}
               <span className="text-muted">量</span>
               <span className="text-secondary">{d.volume.toFixed(0)}</span>
               <span className="text-muted">额</span>

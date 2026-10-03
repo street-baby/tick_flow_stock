@@ -194,6 +194,20 @@ body {
   animation: tickerFlashDown 0.8s ease-out;
 }
 
+/* 7x24 快讯新到达: 短暂高亮, 让「刚刚发生了什么」一眼可见 */
+@keyframes newsArrive {
+  0% { background-color: rgba(0, 229, 255, 0.16); }
+  100% { background-color: transparent; }
+}
+
+.news-arrive {
+  animation: newsArrive 2.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .news-arrive { animation: none; }
+}
+
 /* 全局滚动条高科技定制 (醒目天青蓝) */
 * {
   scrollbar-width: thin;

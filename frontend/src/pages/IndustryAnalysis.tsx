@@ -130,7 +130,7 @@ function median(values: number[]) {
 // ===== 龙头算法 =====
 
 function leaderScore(stock: MarketSnapshotRow) {
-  const pct = (num(stock.change_pct) ?? 0) / 100.0
+  const pct = num(stock.change_pct) ?? 0
   const turnover = num(stock.turnover_rate) ?? 0
   const amount = num(stock.amount) ?? 0
   const cap = num(stock.float_market_cap) ?? num(stock.market_cap) ?? 0

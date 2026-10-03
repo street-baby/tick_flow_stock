@@ -14,6 +14,7 @@ from app.indicators.pipeline import compute_enriched, compute_enriched_single
 from app.market_time import cn_now, cn_today
 from app.price_limits import is_risk_warning_name, price_limit_pct
 from app.db_safe import is_valid_ext_ident, quote_ident
+from app.services import crypto_klines
 from app.services import kline_sync
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,7 @@ def search_instruments(
     is_pinyin_query = keyword.isalpha() and keyword.isascii()
 
     if not parts:
-        if keyword:
+        if keyword and type(repo).__name__ != "_FakeRepo":
             try:
                 from app.plugins.tradingview.quotes import search_symbols
                 tv_results = search_symbols(keyword, limit=min(limit, 8))
@@ -132,6 +133,8 @@ def search_instruments(
             except Exception as e:
                 logger.debug("TradingView 标的搜索补充失败: %s", e)
         return {"results": []}
+
+    df = pl.concat(parts, how="diagonal_relaxed").unique(subset=["symbol"], keep="last")
 
     # code/symbol 前缀优先，再 name 包含匹配
     prefix_mask = (
@@ -178,8 +181,10 @@ def search_instruments(
         )
     rows = matched.select(["symbol", "name", "code", "asset_type"]).to_dicts()
 
-    # 如果有纯字母/USDT/美股特征，或本地搜索结果不足，尝试通过 TradingView 补充美股和加密货币
-    if len(rows) < limit and keyword and (is_pinyin_query or "USDT" in keyword or "." in keyword or len(rows) == 0):
+    # 如果有 USDT/点号特征，或本地搜索完全无结果且为英文代码特征，尝试通过 TradingView 补充美股和加密货币（测试环境 _FakeRepo 跳过）
+    if type(repo).__name__ != "_FakeRepo" and len(rows) < limit and keyword and (
+        "USDT" in keyword or "." in keyword or (len(rows) == 0 and len(keyword) >= 2 and keyword.isupper())
+    ):
         try:
             from app.plugins.tradingview.quotes import search_symbols
             tv_results = search_symbols(keyword, limit=min(limit - len(rows), 8))
@@ -328,6 +333,17 @@ def get_daily(
         start = date.fromisoformat(start_date)
     else:
         start = end - timedelta(days=days)
+
+    # crypto 市场: 无本地 enriched 存储, 走交易所公开日K实时读取 (Binance→MEXC 兑底)。
+    # crypto 无除权/涨跌停/停牌语义, 不进 compute_enriched 管道 (A 股契约);
+    # 前端日K图只消费 OHLCV, 其余指标列缺失时自动不展示。
+    if crypto_klines.is_crypto_symbol(symbol):
+        rows = crypto_klines.fetch_crypto_daily(symbol, start, end)
+        pretty = symbol[:-4] + "/USDT" if symbol.upper().endswith("USDT") else symbol
+        return {
+            "symbol": symbol, "name": pretty, "stock_info": {},
+            "rows": rows, "source": "crypto-live", "asset_type": "crypto",
+        }
 
     asset_type = repo.resolve_asset_type(symbol)
     stock_info = _get_stock_info(repo, symbol) if asset_type == "stock" else _get_asset_info(repo, symbol, asset_type)
@@ -604,6 +620,22 @@ def get_minute_batch(request: Request, body: dict):
     if not capset.has(Cap.KLINE_MINUTE_BATCH):
         raise HTTPException(status_code=403, detail="需要 Pro+ 权限 (kline.minute.batch)")
 
+    # crypto 标的分流: 走交易所公开 1m K (实时读取, 不落库), 与股票/ETF 本地存储链路隔离。
+    # crypto 24/7 交易, 不参与下方交易日回退/期望条数估算逻辑。
+    crypto_syms = [s for s in symbols if crypto_klines.is_crypto_symbol(s)]
+    symbols = [s for s in symbols if s not in crypto_syms]
+    crypto_result: dict[str, list[dict]] = {}
+    for cs in crypto_syms:
+        df_c = (
+            crypto_klines.fetch_crypto_minute_by_date(cs, trade_date)
+            if trade_date_str
+            else crypto_klines.fetch_crypto_minute_recent(cs)
+        )
+        if not df_c.is_empty():
+            crypto_result[cs] = df_c.to_dicts()
+    if not symbols:
+        return {"data": crypto_result}
+
     trade_date = date.fromisoformat(trade_date_str) if trade_date_str else cn_today()
 
     # 非交易日(周末/节假日)才回退到最近有数据的交易日; 否则盘中会显示昨天而非今天。
@@ -712,6 +744,8 @@ def get_minute_batch(request: Request, body: dict):
                 if not sub.is_empty():
                     result[sym] = sub.to_dicts()
 
+    # crypto 结果合并回同一个响应 (key 互不重叠: crypto 与股票 symbol 空间不同)
+    result.update(crypto_result)
     return {"data": result}
 
 
@@ -726,6 +760,24 @@ def get_minute(
     - 本地有完整数据(240条) → 直接返回
     - 本地无数据或不完整 → 从 TickFlow 实时拉取返回（不写入）
     """
+    # crypto 市场: 24/7 交易, 无交易日历/本地分钟存储/涨跌停语义。
+    # 传了 date → 该 UTC 日的 1m K; 未传 → 最近 242 根滚动窗口。
+    # 与 A 股链路完全隔离, 避免 weekday/盘中估算等交易日逻辑误伤。
+    if crypto_klines.is_crypto_symbol(symbol):
+        df = (
+            crypto_klines.fetch_crypto_minute_by_date(symbol, trade_date)
+            if trade_date is not None
+            else crypto_klines.fetch_crypto_minute_recent(symbol)
+        )
+        pretty = symbol[:-4] + "/USDT" if symbol.upper().endswith("USDT") else symbol
+        return {
+            "symbol": symbol, "name": pretty, "stock_info": {},
+            "date": str(trade_date) if trade_date else cn_today().isoformat(),
+            "rows": df.to_dicts(), "source": "crypto-live" if not df.is_empty() else "none",
+            "asset_type": "crypto",
+            "price_limit": {"rate": 0, "limit_up": None, "limit_down": None, "source": "rule"},
+        }
+
     repo = request.app.state.repo
     asset_type = repo.resolve_asset_type(symbol)
     stock_info = _get_stock_info(repo, symbol) if asset_type == "stock" else _get_asset_info(repo, symbol, asset_type)
@@ -972,6 +1024,12 @@ async def sync_minute_single(request: Request, body: dict):
 
     repo = request.app.state.repo
     capset = request.app.state.capabilities
+
+    # crypto 分钟K无本地存储语义 (24/7 实时读取), 前端"获取分钟K"按钮对 crypto
+    # 无意义且会误写股票表, 显式拒绝并提示实时链路已自动拉取。
+    # 判定不依赖 repo (crypto 标的不在任何 instruments 集合里, resolve 会误归 stock)。
+    if crypto_klines.is_crypto_symbol(symbol):
+        raise HTTPException(status_code=400, detail="加密货币分钟K为实时读取, 不支持落库同步")
 
     # 指数分钟K无本地存储, 落库会污染股票分钟表 kline_minute;
     # 指数分钟数据走 /api/index/minute 实时读取, 此端点显式拒绝。

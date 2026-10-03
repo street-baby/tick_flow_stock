@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Trash2, RefreshCw, Star, X, Search, LayoutGrid, List, Settings2, Plus, Check, Filter, Eye, EyeOff, Minus, ChevronsUp, Clock, RotateCcw, ImagePlus } from 'lucide-react'
+import { Trash2, RefreshCw, Star, X, Search, LayoutGrid, List, Settings2, Plus, Check, Filter, Eye, EyeOff, Minus, ChevronsUp, Clock, RotateCcw, ImagePlus, Sparkles } from 'lucide-react'
 import { api, type KlineRow, type MinuteKlineRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { storage } from '@/lib/storage'
@@ -484,6 +484,16 @@ const StockCard = React.memo(function StockCard({
               {board.label}
             </span>
           )}
+          {r.group && r.group !== '默认' && (
+            <span className="shrink-0 inline-flex items-center justify-center px-1.5 h-[16px] rounded text-[9px] font-medium bg-accent/10 text-accent border border-accent/20">
+              {r.group}
+            </span>
+          )}
+          {r.note && (
+            <span className="shrink-0 inline-flex items-center justify-center px-1.5 h-[16px] rounded text-[9px] font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20" title={r.note}>
+              {r.note.includes('·') ? r.note.split('·')[1] : r.note}
+            </span>
+          )}
           {r.consecutive_limit_ups > 0 && (
             <span className="shrink-0 inline-flex items-center justify-center px-1 h-[16px] rounded bg-danger/15 text-danger text-[9px] font-bold tabular-nums">
               {r.consecutive_limit_ups === 1 ? '首板' : `${r.consecutive_limit_ups}连`}
@@ -691,15 +701,23 @@ export function Watchlist() {
     })
   }, [])
 
+  const [selectedGroup, setSelectedGroup] = useState<string>('全部')
+
+  const groupsQuery = useQuery({
+    queryKey: QK.watchlistGroups,
+    queryFn: api.watchlistGroups,
+  })
+  const groups = groupsQuery.data?.groups ?? []
+
   const list = useQuery({
-    queryKey: QK.watchlist,
-    queryFn: api.watchlistList,
+    queryKey: ['watchlist', selectedGroup],
+    queryFn: () => api.watchlistList(selectedGroup),
   })
 
-  // enriched 数据 — 传入 ext_columns 参数
+  // enriched 数据 — 传入 ext_columns 与 selectedGroup 参数
   const enriched = useQuery({
-    queryKey: QK.watchlistEnriched(extColumnsParam),
-    queryFn: () => api.watchlistEnriched(extColumnsParam || undefined),
+    queryKey: QK.watchlistEnriched(extColumnsParam, selectedGroup),
+    queryFn: () => api.watchlistEnriched(extColumnsParam || undefined, selectedGroup),
     enabled: (list.data?.symbols.length ?? 0) > 0,
   })
 
@@ -742,36 +760,47 @@ export function Watchlist() {
   })
   const minuteData = intradayVisible ? (minuteBatch.data?.data ?? {}) : {}
 
+  const populateMutation = useMutation({
+    mutationFn: api.watchlistPopulateSectors,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['watchlist'] })
+      qc.invalidateQueries({ queryKey: QK.watchlistGroups })
+      qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
+      qc.invalidateQueries({ queryKey: ['watchlist-kline-batch'] })
+    },
+  })
+
   const addMutation = useMutation({
-    mutationFn: (sym: string) => api.watchlistAdd(sym),
-    onSuccess: (data) => {
-      qc.setQueryData(QK.watchlist, data)
-      qc.invalidateQueries({ queryKey: QK.watchlist })
+    mutationFn: (sym: string) => api.watchlistAdd(sym, '', selectedGroup !== '全部' ? selectedGroup : '默认'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['watchlist'] })
+      qc.invalidateQueries({ queryKey: QK.watchlistGroups })
       qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
       qc.invalidateQueries({ queryKey: ['watchlist-kline-batch'] })
     },
   })
 
   const remove = useMutation({
-    mutationFn: (sym: string) => api.watchlistRemove(sym),
+    mutationFn: (sym: string) => api.watchlistRemove(sym, selectedGroup !== '全部' ? selectedGroup : undefined),
     onSuccess: (_data, sym) => {
       // 1. 立即从 enriched 缓存中移除该股票，UI 即时更新
-      qc.setQueryData(['watchlist-enriched', extColumnsParam], (old: any) => {
+      qc.setQueryData(['watchlist-enriched', extColumnsParam, selectedGroup], (old: any) => {
         if (!old?.rows) return old
         return { ...old, rows: old.rows.filter((r: any) => r.symbol !== sym) }
       })
       // 2. 清除 list 缓存，触发后台 refetch
-      qc.invalidateQueries({ queryKey: QK.watchlist })
+      qc.invalidateQueries({ queryKey: ['watchlist'] })
+      qc.invalidateQueries({ queryKey: QK.watchlistGroups })
       qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
       qc.invalidateQueries({ queryKey: ['watchlist-kline-batch'] })
     },
   })
 
   const moveToTop = useMutation({
-    mutationFn: (sym: string) => api.watchlistMoveToTop(sym),
-    onSuccess: (data) => {
-      qc.setQueryData(QK.watchlist, data)
-      qc.invalidateQueries({ queryKey: QK.watchlist })
+    mutationFn: (sym: string) => api.watchlistMoveToTop(sym, selectedGroup !== '全部' ? selectedGroup : undefined),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['watchlist'] })
+      qc.invalidateQueries({ queryKey: QK.watchlistGroups })
       qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
       qc.invalidateQueries({ queryKey: ['watchlist-kline-batch'] })
       qc.invalidateQueries({ queryKey: QK.preferences })
@@ -780,12 +809,13 @@ export function Watchlist() {
   })
 
   const clearAll = useMutation({
-    mutationFn: () => api.watchlistClear(),
+    mutationFn: () => api.watchlistClear(selectedGroup !== '全部' ? selectedGroup : undefined),
     onSuccess: () => {
       setConfirmClear(false)
       // 立即清空 enriched 缓存
-      qc.setQueryData(['watchlist-enriched', extColumnsParam], { rows: [], as_of: null, elapsed_ms: 0 })
-      qc.invalidateQueries({ queryKey: QK.watchlist })
+      qc.setQueryData(['watchlist-enriched', extColumnsParam, selectedGroup], { rows: [], as_of: null, elapsed_ms: 0 })
+      qc.invalidateQueries({ queryKey: ['watchlist'] })
+      qc.invalidateQueries({ queryKey: QK.watchlistGroups })
       qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
       qc.invalidateQueries({ queryKey: ['watchlist-kline-batch'] })
     },
@@ -806,7 +836,15 @@ export function Watchlist() {
   const handleCardRequestRemove = useCallback((sym: string) => setConfirmRemove(sym), [])
 
   const allSymbols = list.data?.symbols?.map(s => s.symbol) ?? []
-  const rows = enriched.data?.rows ?? []
+  const rows = useMemo(() => {
+    const raw = enriched.data?.rows ?? []
+    const seen = new Set<string>()
+    return raw.filter((r: any) => {
+      if (!r?.symbol || seen.has(r.symbol)) return false
+      seen.add(r.symbol)
+      return true
+    })
+  }, [enriched.data?.rows])
 
   // 实时监控圆点: 仅 Free/低档 "按自选股实时监控" 模式 (mode === 'watchlist') 下显示;
   // Starter+ 全市场模式 (mode === 'full_market') 全部标的都在监控, 标圆点无意义, 故不显示。
@@ -1104,6 +1142,46 @@ export function Watchlist() {
         }
       />
 
+      {/* 板块分类 Tab 导航栏 */}
+      <div className="px-5 py-2.5 border-b border-border/70 bg-surface/40 flex items-center gap-2 overflow-x-auto select-none no-scrollbar">
+        <div className="flex items-center gap-1.5 shrink-0 py-0.5">
+          {groups.map((g: any) => {
+            const isActive = selectedGroup === g.name
+            return (
+              <button
+                key={g.name}
+                type="button"
+                onClick={() => setSelectedGroup(g.name)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                  isActive
+                    ? 'bg-accent/15 text-accent border border-accent/40 shadow-sm'
+                    : 'bg-elevated/70 text-secondary hover:bg-elevated hover:text-foreground border border-transparent'
+                }`}
+              >
+                <span>{g.name}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full tabular-nums ${
+                  isActive ? 'bg-accent/20 text-accent font-semibold' : 'bg-surface text-muted'
+                }`}>
+                  {g.count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="ml-auto shrink-0 pl-2">
+          <button
+            type="button"
+            onClick={() => populateMutation.mutate()}
+            disabled={populateMutation.isPending}
+            className="px-2.5 py-1 text-xs rounded-btn bg-accent/10 hover:bg-accent/20 text-accent border border-accent/30 transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-sm"
+            title="一键按各板块最新连板龙头、成交额中军和高换手活跃度，自动挑选核心股票并注入板块分类"
+          >
+            <Sparkles className={`h-3.5 w-3.5 ${populateMutation.isPending ? 'animate-spin' : ''}`} />
+            <span>{populateMutation.isPending ? '正在更新板块...' : '一键刷新各板块核心股'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* 筛选栏 */}
       {filterOpen && (
         <div className="px-5 py-2 border-b border-border bg-surface/50 max-h-[184px] overflow-y-auto">
@@ -1293,6 +1371,16 @@ export function Watchlist() {
                               {board.label}
                             </span>
                           ) : null}
+                          {r.group && r.group !== '默认' && (
+                            <span className="shrink-0 inline-flex items-center justify-center px-1.5 h-[18px] rounded text-[10px] font-medium bg-accent/10 text-accent border border-accent/20">
+                              {r.group}
+                            </span>
+                          )}
+                          {r.note && (
+                            <span className="shrink-0 inline-flex items-center justify-center px-1.5 h-[18px] rounded text-[10px] font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20" title={r.note}>
+                              {r.note.includes('·') ? r.note.split('·')[1] : r.note}
+                            </span>
+                          )}
                           {monitoredSymbols.has(r.symbol) && <span className="ml-2"><RealtimeDot /></span>}
                         </button>
                         {/* 删除入口：默认减号图标，二次确认时替换为确定按钮 */}

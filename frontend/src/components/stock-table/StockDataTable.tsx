@@ -93,11 +93,11 @@ export function StockDataTable({
     ? 'sticky top-0 z-10 bg-surface after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-border'
     : 'bg-elevated'
 
-  const renderRow = (r: any, virtualRow?: VirtualItem) => (
+  const renderRow = (r: any, index?: number, virtualRow?: VirtualItem) => (
     <tr
-      key={rowKey(r)}
+      key={virtualRow ? virtualRow.key : (r?.symbol ? `${r.symbol}_${index}` : index)}
       ref={virtualRow ? rowVirtualizer.measureElement : undefined}
-      data-index={virtualRow?.index}
+      data-index={virtualRow?.index ?? index}
       className={`transition-colors duration-150 ease-smooth group ${rowClassName(r)}`}
     >
       {visibleColumns.map(col => {
@@ -148,8 +148,8 @@ export function StockDataTable({
             </tr>
           )}
           {virtualized
-            ? virtualRows.map(virtualRow => renderRow(rows[virtualRow.index], virtualRow))
-            : rows.map((r: any) => renderRow(r))}
+            ? virtualRows.map(virtualRow => renderRow(rows[virtualRow.index], virtualRow.index, virtualRow))
+            : rows.map((r: any, idx: number) => renderRow(r, idx))}
           {virtualized && bottomPadding > 0 && (
             <tr aria-hidden="true">
               <td colSpan={columnCount} className="p-0 border-0" style={{ height: bottomPadding }} />

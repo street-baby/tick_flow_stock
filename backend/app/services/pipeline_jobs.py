@@ -97,7 +97,9 @@ class JobStore:
         jobs: list[dict[str, Any]] = []
         for f in self._store_dir.glob("*.json"):
             try:
-                jobs.append(json.loads(f.read_text("utf-8")))
+                data = json.loads(f.read_text("utf-8"))
+                if isinstance(data, dict) and data.get("id"):
+                    jobs.append(data)
             except Exception:
                 continue
         jobs.sort(key=lambda j: j.get("started_at") or "", reverse=True)
@@ -225,8 +227,8 @@ class JobStore:
         seen: set[str] = set()
         result: list[dict[str, Any]] = []
         for j in sorted(all_jobs, key=lambda x: x.get("started_at") or "", reverse=True):
-            jid = j["id"]
-            if jid in seen:
+            jid = j.get("id")
+            if not jid or jid in seen:
                 continue
             seen.add(jid)
             result.append(_summary(j))

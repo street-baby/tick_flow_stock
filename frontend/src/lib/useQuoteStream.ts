@@ -173,6 +173,13 @@ export function useQuoteStream(
         qc.invalidateQueries({ queryKey: ['overview-market'] })
       })
 
+      es.addEventListener('news_updated', () => {
+        // 7x24 快讯滚到新条目: 服务端已把它并进滚动池, 前端只需重取这一条查询。
+        // 不连带 invalidate 板块简报 —— 简报是日级数据, 被快讯节奏刷只是白拉。
+        // 也不受实时行情开关限制: 快讯刷新不依赖行情轮询。
+        qc.invalidateQueries({ queryKey: ['flash-tagged'] })
+      })
+
       es.addEventListener('strategy_alert', (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data)

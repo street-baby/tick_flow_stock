@@ -166,7 +166,10 @@ export function StockAnalysisDialog({ task, mode, minimized }: Props) {
                   <Loader2 className="absolute -inset-1 h-12 w-12 text-sky-400/40 animate-spin" style={{ animationDuration: '3s' }} />
                 </div>
                 <div className="text-xs text-secondary">AI 正在分析行情与关键价位…</div>
-                <div className="text-[10px] text-muted">读取日 K / 技术指标 / 压力支撑 / 财务,生成四维分析</div>
+                <div className="text-[10px] text-muted text-center max-w-xs leading-relaxed">
+                  读取日 K / 技术指标 / 压力支撑 / 财务<br />
+                  <span className="text-sky-400/80">深度推理模型正在后台推演思考链，首批内容约需 30~60 秒</span>
+                </div>
               </div>
             )}
 

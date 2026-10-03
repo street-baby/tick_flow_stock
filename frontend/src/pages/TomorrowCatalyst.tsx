@@ -45,10 +45,15 @@ function Sparkline({ isUp }: { isUp: boolean }) {
 }
 
 function StockBadge({ stock }: { stock: TomorrowCatalystStock }) {
-  const pct = stock.change_pct ?? 0
+  let pct = stock.change_pct ?? 0
+  // 若绝对值 <= 0.25 且非0，说明数据源给的是小数形式（如 0.052 代表 +5.20%）
+  if (Math.abs(pct) > 0 && Math.abs(pct) <= 0.25) {
+    pct = pct * 100
+  }
   const isUp = pct > 0
-  const isZero = pct === 0
+  const isZero = Math.abs(pct) < 0.001
   const pctStr = `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`
+  const priceStr = stock.last_price != null ? `¥${Number(stock.last_price).toFixed(2)}` : ''
 
   return (
     <div
@@ -60,9 +65,10 @@ function StockBadge({ stock }: { stock: TomorrowCatalystStock }) {
           ? 'bg-surface text-secondary border-border hover:bg-elevated'
           : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 hover:border-emerald-500/40'
       )}
-      title={`${stock.symbol} ${stock.name} ${stock.last_price ? `现价: ¥${stock.last_price}` : ''}`}
+      title={`${stock.symbol} ${stock.name} ${priceStr ? `现价: ${priceStr}` : ''}`}
     >
       <span className="font-semibold">{stock.name}</span>
+      {priceStr && <span className="font-mono text-[11px] opacity-80">{priceStr}</span>}
       <span className="font-mono text-[11px] font-bold">{pctStr}</span>
     </div>
   )
@@ -85,23 +91,46 @@ export function TomorrowCatalyst() {
   const [newStocksStr, setNewStocksStr] = useState('')
   const [newSectorPct, setNewSectorPct] = useState('2.0')
 
-  // 获取前瞻题材
+  // 获取前瞻题材（自动每 15 秒轮询最新 AI 分析，无需用户手动刷新）
   const { data: catalystsData, isLoading: isCatLoading, refetch: refetchCat } = useQuery({
     queryKey: ['tomorrow-catalysts', keyword],
     queryFn: () => api.tomorrowCatalysts(keyword),
+    refetchInterval: 15000,
   })
 
-  // 获取今日早盘前瞻
+  // 获取今日早盘前瞻（自动每 15 秒轮询）
   const { data: morningData, isLoading: isMorningLoading, refetch: refetchMorning } = useQuery({
     queryKey: ['morning-brief'],
     queryFn: () => api.morningBrief(),
+    refetchInterval: 15000,
+  })
+
+  // 获取自动调度器状态（AI 每30分钟提炼 · 每日 23:55 终极汇总）
+  const { data: schedStatus } = useQuery({
+    queryKey: ['catalyst-scheduler-status'],
+    queryFn: () => api.catalystSchedulerStatus(),
+    refetchInterval: 10000,
   })
 
   // 获取 7x24 快讯
   const { data: flashData, isLoading: isFlashLoading, refetch: refetchFlash } = useQuery({
     queryKey: ['news-flash'],
     queryFn: () => api.newsFlash(60),
-    refetchInterval: 30000,
+    refetchInterval: 20000,
+  })
+
+  // 即刻触发后台分析 Mutation
+  const triggerMutation = useMutation({
+    mutationFn: (mode: '30min' | '2355') => api.triggerCatalystNow(mode),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['tomorrow-catalysts'] })
+      qc.invalidateQueries({ queryKey: ['morning-brief'] })
+      qc.invalidateQueries({ queryKey: ['catalyst-scheduler-status'] })
+      toast(`分析更新完成，已同步 ${res.items_count || 0} 条题材`, 'success')
+    },
+    onError: (err: any) => {
+      toast(err.message || '更新失败', 'error')
+    },
   })
 
   // AI 生成前瞻题材 Mutation (AKShare + LLM)
@@ -326,6 +355,85 @@ export function TomorrowCatalyst() {
 
       {/* 主体内容 */}
       <div className="max-w-7xl mx-auto px-6 pt-6 space-y-6">
+        {/* 🤖 实时新闻抓取 & AI 自动更新状态栏 (AI 每半小时整理一次 · 每日 23:55 终极汇总) */}
+        <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/[0.08] via-surface to-blue-500/[0.05] p-3.5 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            {/* 左侧：实时状态与说明 */}
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-emerald-400 tracking-wide">
+                    AI 自动实时监控已开启 · 免手动刷新
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    🟢 自动实时更新中
+                  </span>
+                  {schedStatus?.is_running_task && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300 animate-pulse">
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                      AI 正在提炼最新新闻与题材...
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-muted mt-0.5">
+                  自动采集全网实时快讯 · <span className="text-foreground/90 font-medium">AI 每 30 分钟滚动解析</span> · <span className="text-amber-400 font-medium">每日北京时间 23:55 终极全量整合</span> 次日核心题材
+                </div>
+              </div>
+            </div>
+
+            {/* 右侧：统计指标与操作 */}
+            <div className="flex items-center gap-3 text-xs flex-wrap">
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                <span className="text-[10px]">🇨🇳 东八区</span>
+                <span className="font-mono font-bold">
+                  {schedStatus?.beijing_time ? schedStatus.beijing_time.slice(11) : '北京时间'}
+                </span>
+              </div>
+              <div className="h-3.5 w-px bg-border/60" />
+              <div className="flex items-center gap-1 text-muted">
+                <span>今日累积要闻:</span>
+                <span className="font-mono font-bold text-foreground">
+                  {schedStatus?.today_news_count || flashData?.total || 0} 条
+                </span>
+              </div>
+              <div className="h-3.5 w-px bg-border/60" />
+              <div className="flex items-center gap-1 text-muted">
+                <span>下次滚动更新:</span>
+                <span className="font-mono text-foreground font-medium">
+                  {schedStatus?.next_30min_update ? schedStatus.next_30min_update.slice(11) : '30分钟后'}
+                </span>
+              </div>
+              <div className="h-3.5 w-px bg-border/60" />
+              <div className="flex items-center gap-1 text-muted">
+                <span>全天终极整合:</span>
+                <span className="font-mono text-amber-400 font-bold">每日 23:55</span>
+              </div>
+              <div className="flex items-center gap-1.5 ml-1">
+                <button
+                  onClick={() => triggerMutation.mutate('30min')}
+                  disabled={triggerMutation.isPending || schedStatus?.is_running_task}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium bg-elevated hover:bg-border text-foreground border border-border cursor-pointer transition-all disabled:opacity-50"
+                  title="立即触发一次半小时滚动解析"
+                >
+                  {triggerMutation.isPending ? '提炼中...' : '即刻解析'}
+                </button>
+                <button
+                  onClick={() => triggerMutation.mutate('2355')}
+                  disabled={triggerMutation.isPending || schedStatus?.is_running_task}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 cursor-pointer transition-all disabled:opacity-50 shadow-sm"
+                  title="立即执行北京时间 23:55 全天终极汇总"
+                >
+                  23:55 终极汇总
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* 🌅 今日早盘开盘前瞻 · 盘前必读卡片 */}
         {brief && (
           <motion.div

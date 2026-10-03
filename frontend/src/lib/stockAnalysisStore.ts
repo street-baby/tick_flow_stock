@@ -158,6 +158,9 @@ export async function findTodayReport(symbol: string): Promise<HistoryReport | n
 }
 
 export async function startAnalysis(symbol: string, name: string, focus = ''): Promise<{ id?: string; error?: string }> {
+  // 清理该标的已失败的旧任务，确保点击重试时对话框直接绑定新任务
+  activeTasks = activeTasks.filter(t => !(t.symbol === symbol && t.phase === 'error'))
+
   const existing = activeTasks.find(t => t.symbol === symbol && (t.phase === 'loading' || t.phase === 'streaming'))
   if (existing) {
     activeDialogTaskId = existing.id

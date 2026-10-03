@@ -67,6 +67,10 @@ def _load_concept_map_df(repo, kind: str = "concept") -> tuple[pl.DataFrame, int
     now = time.time()
     cached = _map_cache.get(kind)
     if cached is not None and (now - _map_ts.get(kind, 0)) < 600:
+        # 命中必须与未命中同形状: 只返回 map_df 时, 调用方的
+        # `map_df, member_count = ...` 会把 DataFrame 解包成两个 Series,
+        # 随后 df.join(Series) 抛 TypeError —— 映射缓存(600s)比结果缓存(120s)
+        # 活得久, 于是每轮有 8 分钟整段 500。
         return cached
 
     data_dir = repo.store.data_dir
@@ -95,13 +99,13 @@ def _load_concept_map_df(repo, kind: str = "concept") -> tuple[pl.DataFrame, int
         ).unique()
     else:
         map_df = pl.DataFrame(schema={"_sym_up": pl.Utf8, kind: pl.Utf8})
-    _map_cache[kind] = map_df
+    _map_cache[kind] = (map_df, len(members_seen))
     _map_ts[kind] = now
     return map_df, len(members_seen)
 
 
 # 维度映射缓存: {kind: (map_df, count)}。按 kind 隔离(概念/行业分别缓存)。
-_map_cache: dict[str, pl.DataFrame] = {}
+_map_cache: dict[str, tuple[pl.DataFrame, int]] = {}
 _map_ts: dict[str, float] = {}
 
 

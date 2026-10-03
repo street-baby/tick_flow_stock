@@ -700,6 +700,8 @@ class KlineRepository:
                 step = time.perf_counter()
                 logger.info("enriched refresh step start: collect history from %s", start_full)
                 df_hist = lf.select(read_cols).collect()
+                from app.indicators.pipeline import filter_halt_days
+                df_hist = filter_halt_days(df_hist)
                 logger.info("enriched refresh step done: collect history rows=%d (%.2fs)", len(df_hist), time.perf_counter() - step)
                 if not df_hist.is_empty():
                     instruments = self._instruments_cache if self._instruments_cache is not None else pl.DataFrame()
@@ -976,24 +978,29 @@ class KlineRepository:
         agg_a = agg_a.join(df_vol, on="symbol", how="left")
         logger.info("live agg step done: annual vol state (%.2fs)", time.perf_counter() - step)
 
-        # 昨日连板数: 使用每只股票最后一个有效交易日状态 (用于增量计算同向 +1)
+        # 昨日连板数: 使用每只股票最后一个有效交易日状态 (优先从磁盘落盘的 enriched parquet 读取真实连板数)
         step = time.perf_counter()
         logger.info("live agg step start: consecutive state")
-        consec_cols = [c for c in ["symbol", "consecutive_limit_ups", "consecutive_limit_downs"]
-                       if c in df_hist.columns]
-        consec_source = df_hist
-        if len(consec_cols) != 3:
-            lf = (
+        consec_cols = ["symbol", "consecutive_limit_ups", "consecutive_limit_downs"]
+        consec_source = pl.DataFrame()
+        try:
+            lf_consec = (
                 scan_enriched_parquet(self._enriched_glob)
                 .filter((pl.col("date") >= start_60d) & (pl.col("date") <= latest))
                 .sort(["symbol", "date"])
             )
-            consec_cols = [
-                c for c in ["symbol", "consecutive_limit_ups", "consecutive_limit_downs"]
-                if c in lf.collect_schema().names()
-            ]
-            consec_source = lf.select("date", *consec_cols).collect()
-        if len(consec_cols) == 3:
+            avail = lf_consec.collect_schema().names()
+            if all(c in avail for c in consec_cols):
+                consec_source = lf_consec.select("date", *consec_cols).collect()
+        except Exception as e:
+            logger.warning("scan_enriched_parquet for consecutive state failed: %s", e)
+
+        if consec_source.is_empty():
+            consec_cols_hist = [c for c in consec_cols if c in df_hist.columns]
+            if len(consec_cols_hist) == 3:
+                consec_source = df_hist
+
+        if not consec_source.is_empty() and all(c in consec_source.columns for c in consec_cols):
             consec_df = _last_available_rows(
                 consec_source.select("date", *consec_cols), latest,
             )
@@ -2338,6 +2345,7 @@ class KlineRepository:
         """覆写当天指定资产日K分区 (实时行情落盘, 非merge)。"""
         if df.is_empty() or "date" not in df.columns:
             return
+        df = df.unique(subset=["symbol"], keep="last")
         table = {
             "stock": "kline_daily",
             "index": "kline_index_daily",
@@ -2364,8 +2372,9 @@ class KlineRepository:
         """覆写当天指定资产 enriched 分区 (实时 enriched 落盘, 非merge)。"""
         if df.is_empty() or "date" not in df.columns:
             return
+        df = df.unique(subset=["symbol"], keep="last")
         dt = df["date"][0]
-        cache_df = self._with_instrument_metadata(asset_type, df).sort(["symbol"])
+        cache_df = self._with_instrument_metadata(asset_type, df).unique(subset=["symbol"], keep="last").sort(["symbol"])
         if asset_type == "stock":
             self._enriched_cache = cache_df
             self._enriched_cache_date = dt

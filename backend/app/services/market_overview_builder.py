@@ -299,7 +299,19 @@ def _symbol_keys(row: dict, config: ExtConfig) -> list[str]:
     return keys
 
 
-def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 5, level: int | None = None) -> dict:
+def _dimension_rank(
+    rows: list[dict],
+    repo,
+    kind: str,
+    limit: int = 5,
+    level: int | None = None,
+    with_members: bool = False,
+) -> dict:
+    """按维度(概念/行业)聚合当日行情并给出领先/落后榜单。
+
+    with_members=True 时每项附带按涨幅降序的完整成分股列表(供板块简报挑关联标的);
+    默认 False 保持看板/复盘的原有返回结构不变。
+    """
     if not rows:
         return {"leading": [], "lagging": []}
 
@@ -341,7 +353,7 @@ def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 5, level: in
         if not changes:
             continue
         leader = max(stocks, key=lambda s: _finite(s.get("change_pct")) or -999)
-        items.append({
+        item = {
             "name": name,
             "count": len(stocks),
             "avg_pct": sum(changes) / len(changes),
@@ -353,7 +365,22 @@ def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 5, level: in
                 "name": leader.get("name"),
                 "change_pct": _finite(leader.get("change_pct")),
             },
-        })
+        }
+        if with_members:
+            ranked = sorted(
+                stocks,
+                key=lambda s: _finite(s.get("change_pct")) if _finite(s.get("change_pct")) is not None else -999.0,
+                reverse=True,
+            )
+            item["members"] = [
+                {
+                    "symbol": s.get("symbol"),
+                    "name": s.get("name"),
+                    "change_pct": _finite(s.get("change_pct")),
+                }
+                for s in ranked
+            ]
+        items.append(item)
 
     leading = sorted(items, key=lambda x: x["avg_pct"], reverse=True)[:limit]
     lagging = sorted(items, key=lambda x: x["avg_pct"])[:limit]
@@ -365,7 +392,14 @@ def _dimension_rank(rows: list[dict], repo, kind: str, limit: int = 5, level: in
 # ================================================================
 
 def _top_rows(rows: list[dict], key: str, descending: bool, limit: int = 8, board_label: str | None = None) -> list[dict]:
-    filtered = [r for r in rows if _finite(r.get(key)) is not None]
+    seen: set[str] = set()
+    unique_rows: list[dict] = []
+    for r in rows:
+        sym = r.get("symbol")
+        if sym and sym not in seen:
+            seen.add(sym)
+            unique_rows.append(r)
+    filtered = [r for r in unique_rows if _finite(r.get(key)) is not None]
     filtered.sort(key=lambda r: _finite(r.get(key)) or 0, reverse=descending)
     return [
         {
@@ -459,6 +493,12 @@ def build_market_overview(
     if df.is_empty():
         rows: list[dict] = []
     else:
+        # 严格按 symbol 去重并仅保留真实 A 股股票（60/68/00/30/43/83/87/92，过滤 ETF/基金/可转债）
+        stock_prefixes = ["60", "68", "00", "30", "43", "83", "87", "92"]
+        df = (
+            df.unique(subset=["symbol"], keep="last")
+            .filter(pl.col("symbol").str.slice(0, 2).is_in(stock_prefixes))
+        )
         cols = [
             "symbol", "name", "close", "change_pct", "amount", "turnover_rate", "volume",
             "vol_ratio_5d", "consecutive_limit_ups", "signal_limit_up", "signal_broken_limit_up", "signal_limit_down",
@@ -672,6 +712,18 @@ def build_market_overview_market(
     from app.markets import get_market
     from app.services.screener import ScreenerService
     from app.services.index_sync_market import get_market_index_quotes
+
+    if market in ("us", "crypto") and type(repo).__name__ != "_FakeRepo":
+        from app.plugins.tradingview.overview import get_tradingview_market_overview, get_us_trading_date
+        target_date = get_us_trading_date() if market == "us" else date.today()
+        if as_of is None or as_of >= target_date:
+            try:
+                tv_data = get_tradingview_market_overview(market=market, as_of=target_date, repo=repo)
+                if tv_data and tv_data.get("breadth", {}).get("total", 0) > 0:
+                    return tv_data
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("TradingView overview 获取失败，回退本地: %s", e)
 
     meta = get_market(market)
     svc = ScreenerService(repo, market=market)

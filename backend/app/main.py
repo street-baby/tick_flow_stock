@@ -1,6 +1,14 @@
 """FastAPI 入口。"""
 from __future__ import annotations
 
+import os
+import time
+
+# 严格锁定整个服务进程为北京时间（东八区 Asia/Shanghai UTC+8）
+os.environ["TZ"] = "Asia/Shanghai"
+if hasattr(time, "tzset"):
+    time.tzset()
+
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -12,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import analysis, auth as auth_api, backtest, data, ext_data, financials, indices, indices_market, intraday, kline, market_recap, monitor_rules, alerts, overview, pipeline, regime, rps, screener, settings as settings_api, signals, stock_analysis, strategy, watchlist, news, auction, darkpool, trade_plan
+from app.api import analysis, auth as auth_api, backtest, data, ext_data, financials, indices, indices_market, intraday, kline, market_recap, monitor_rules, alerts, overview, pipeline, regime, rps, screener, settings as settings_api, signals, stock_analysis, strategy, watchlist, news, auction, darkpool, trade_plan, longhubang, game_theory, speed_rank
 from app.api.routes import router as core_router
 from app.config import settings
 from app.jobs import daily_pipeline
@@ -100,6 +108,55 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         logger.warning("scheduler not started: %s", e)
         app.state.scheduler = None
+
+    # 明天炒什么 · 题材催化前瞻自动调度引擎 (每5分钟抓取 · 每30分钟AI滚动解析 · 每日23:55终极汇总)
+    try:
+        import asyncio
+        from app.services.catalyst_scheduler import TomorrowCatalystScheduler
+        catalyst_scheduler = TomorrowCatalystScheduler(data_dir=store.data_dir)
+        if app.state.scheduler:
+            catalyst_scheduler.register_jobs(app.state.scheduler)
+        app.state.catalyst_scheduler = catalyst_scheduler
+
+        async def _delayed_bootstrap():
+            await asyncio.sleep(6.0)
+            await catalyst_scheduler.run_30min_cycle()
+
+        asyncio.create_task(_delayed_bootstrap())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("catalyst_scheduler init failed: %s", e)
+
+    # 7x24 快讯实时滚动抓取 (资讯页): 服务端按 NEWS_POLL_INTERVAL_SECONDS 持续抓取,
+    # 新条目经 SSE news_updated 推给前端 —— 快讯不再是「每次请求现拉一个 50 条窗口」。
+    try:
+        from app.services.news_poller import NewsPoller
+        news_poller = NewsPoller(data_dir=store.data_dir, quote_service=qs)
+        app.state.news_poller = news_poller
+        news_poller.start()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("news_poller init failed: %s", e)
+
+    # 博弈派 AI 分析引擎
+    try:
+        from app.services.game_theory_service import GameTheoryEngine
+        gt_engine = GameTheoryEngine(data_dir=store.data_dir, repo=repo)
+        app.state.game_theory_engine = gt_engine
+        logger.info("博弈派分析引擎已就绪")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("game_theory_engine init failed: %s", e)
+
+    # 9:25 集合竞价抢筹自动调度与 AI 核心推演引擎
+    try:
+        from app.services.auction_service import AuctionSnatchEngine
+        auction_engine = AuctionSnatchEngine(repo=repo, data_dir=store.data_dir, app_state=app.state)
+        if app.state.scheduler:
+            auction_engine.register_jobs(app.state.scheduler)
+        app.state.auction_engine = auction_engine
+        logger.info("9:25 集合竞价抢筹自动调度与 AI 核心推演引擎已就绪")
+
+        asyncio.create_task(auction_engine.boot_check())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auction_engine init failed: %s", e)
 
     # depth sealed: 启动补跑(当天文件不存在) + 盘中轮询(有能力时)
     try:
@@ -262,6 +319,9 @@ async def lifespan(app: FastAPI):
     dsvc = getattr(app.state, "depth_service", None)
     if dsvc:
         dsvc.stop_polling()
+    npl = getattr(app.state, "news_poller", None)
+    if npl:
+        npl.stop()
     wbot = getattr(app.state, "wecom_bot_service", None)
     if wbot:
         wbot.stop()
@@ -361,6 +421,9 @@ app.include_router(news.router)
 app.include_router(auction.router)
 app.include_router(darkpool.router)
 app.include_router(trade_plan.router)
+app.include_router(longhubang.router)
+app.include_router(game_theory.router)
+app.include_router(speed_rank.router)
 
 
 # 能力门控异常 → 403(而非默认 500)

@@ -307,7 +307,7 @@ async def recap_market_stream(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.5,
-            max_tokens=4500,
+            max_tokens=12000,
         ):
             yield json.dumps({"type": "delta", "content": delta}, ensure_ascii=False)
 
@@ -434,7 +434,7 @@ async def recap_market_stream_market(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.5,
-            max_tokens=4500,
+            max_tokens=12000,
         ):
             yield json.dumps({"type": "delta", "content": delta}, ensure_ascii=False)
     except Exception as e:  # noqa: BLE001

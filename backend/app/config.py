@@ -120,6 +120,12 @@ class Settings(BaseSettings):
         "Chrome/131.0.0.0 Safari/537.36"
     )
 
+    # 资讯: 7x24 快讯实时抓取节奏(秒)。服务端按此节奏持续抓取并累积到滚动池,
+    # 有新快讯就经 SSE 推 news_updated。设 0 关闭自动抓取(退化为按需拉取)。
+    news_poll_interval_seconds: float = Field(
+        default=15.0, description="7x24 快讯抓取间隔(秒), 0 = 关闭自动抓取"
+    )
+
     # Server
     host: str = "0.0.0.0"
     port: int = 3018

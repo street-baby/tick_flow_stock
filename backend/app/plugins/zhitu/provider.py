@@ -302,9 +302,11 @@ class ZhituProvider:
             l_val = float(r.get("l") or 0.0)
             v = float(r.get("v") or 0.0)
             cje = float(r.get("cje") or 0.0)
-            pc = float(r.get("pc") or 0.0)
+            pc_raw = float(r.get("pc") or 0.0)
+            pc = pc_raw / 100.0  # 百分比转小数（0.0262 代表 2.62%）
             ud = float(r.get("ud") or 0.0)
-            zf = float(r.get("zf") or 0.0)
+            zf_raw = float(r.get("zf") or 0.0)
+            zf = zf_raw / 100.0  # 百分比转小数
             hs = float(r.get("hs") or r.get("tr") or 0.0)
 
             out.append({

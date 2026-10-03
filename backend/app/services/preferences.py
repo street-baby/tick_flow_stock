@@ -209,18 +209,39 @@ def get_adj_factor_provider() -> str:
 
 
 def get_minute_data_provider() -> str:
-    provider = str(load().get("minute_data_provider", "tickflow") or "tickflow").lower()
-    return provider if provider in _allowed_data_providers() else "tickflow"
+    raw = load().get("minute_data_provider")
+    if raw:
+        provider = str(raw).lower()
+        if provider in _allowed_data_providers():
+            return provider
+    allowed = _allowed_data_providers()
+    if "zhitu" in allowed:
+        return "zhitu"
+    return "tickflow"
 
 
 def get_realtime_data_provider() -> str:
-    provider = str(load().get("realtime_data_provider", "tickflow") or "tickflow").lower()
-    return provider if provider in _allowed_data_providers() else "tickflow"
+    raw = load().get("realtime_data_provider")
+    if raw:
+        provider = str(raw).lower()
+        if provider in _allowed_data_providers():
+            return provider
+    allowed = _allowed_data_providers()
+    if "zhitu" in allowed:
+        return "zhitu"
+    return "tickflow"
 
 
 def get_financial_provider() -> str:
-    provider = str(load().get("financial_data_provider", "tickflow") or "tickflow").lower()
-    return provider if provider in _allowed_data_providers() else "tickflow"
+    raw = load().get("financial_data_provider")
+    if raw:
+        provider = str(raw).lower()
+        if provider in _allowed_data_providers():
+            return provider
+    allowed = _allowed_data_providers()
+    if "zhitu" in allowed:
+        return "zhitu"
+    return "tickflow"
 
 
 # ===== 盘后管道拉取内容开关 (A股 / ETF / 指数 独立控制) =====
